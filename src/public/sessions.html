@@ -1,0 +1,10 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><title>Gateway Sessions</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#333;padding:24px}
+h1{font-size:20px;margin-bottom:16px}table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}th{background:#fafafa;font-weight:600;font-size:13px;color:#666}
+.status{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.active{background:#52c41a}.idle{background:#faad14}.empty{text-align:center;padding:40px;color:#999}</style></head>
+<body><h1>Gateway Sessions Monitor</h1><div id="content"><div class="empty">加载中...</div></div>
+<script>async function load(){try{let r=await fetch('/health');let d=await r.json();
+document.getElementById('content').innerHTML=`<p>服务状态: ${d.status||'ok'}</p><p>活跃会话: ${d.active_sessions||0}</p>`}
+catch(e){document.getElementById('content').innerHTML='<div class="empty">无法连接</div>'}}load();setInterval(load,5000);</script></body></html>

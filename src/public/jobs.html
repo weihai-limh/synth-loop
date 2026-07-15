@@ -1,0 +1,12 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><title>Job Manager</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#333;padding:24px}
+h1{font-size:20px;margin-bottom:16px}table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}th{background:#fafafa;font-weight:600}
+.badge{padding:2px 8px;border-radius:10px;font-size:12px}.badge.active{background:#e6fffb;color:#13c2c2}.badge.closed{background:#f0f0f0;color:#888}
+.empty{text-align:center;padding:40px;color:#999}</style></head><body><h1>Job Manager</h1>
+<div id="content"><div class="empty">加载中...</div></div>
+<script>async function load(){try{let r=await fetch('http://localhost:13156/api/v1/jobs');let d=await r.json();
+let items=d.items||[];if(!items.length){document.getElementById('content').innerHTML='<div class="empty">暂无Job</div>';return}
+let h='<table><tr><th>Job ID</th><th>来源</th><th>状态</th><th>步骤</th></tr>';
+items.forEach(j=>h+=`<tr><td>${j.id}</td><td>${j.source_type}</td><td><span class="badge ${j.status}">${j.status}</span></td><td>${j.total_steps}</td></tr>`);
+h+='</table>';document.getElementById('content').innerHTML=h}catch(e){document.getElementById('content').innerHTML='<div class="empty">strata-match 不可达</div>'}}load();setInterval(load,10000)</script></body></html>

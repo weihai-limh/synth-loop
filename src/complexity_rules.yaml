@@ -1,0 +1,24 @@
+# complexity_rules.yaml - Phase 3: GW-P2 (v0.5-hotfix-2)
+# 规则仅覆盖两端极值，中间地带由分形 Prompt 接管
+
+rules:
+  - name: simple_greeting
+    level: chat
+    enabled: true
+    patterns:
+      - "hello"
+      - "hi"
+      - "你好"
+      - "谢谢"
+      - "再见"
+      - "好的"
+      - "ok"
+
+  - name: multi_step_task
+    level: task_chain
+    enabled: true
+    patterns:
+      - "先.*再"
+      - "先.*然后"
+      - "然后.*最后"
+      - "分析并.*生成"

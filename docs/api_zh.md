@@ -1,0 +1,1080 @@
+﻿# synth-loop API 文档
+
+> 本文档是 synth-loop 的完整 API 参考。如需了解产品定位和使用场景，请参阅 [产品文档](./product_zh.md)。
+> 如需了解架构设计，请参阅 [设计文档](./design_zh.md)。
+
+---
+
+## 目录
+
+- [概述](#概述)
+- [快速上手](#快速上手)
+- [分形决策与会话管理](#分形决策与会话管理)
+- [认证](#认证)
+- [错误处理](#错误处理)
+- [API 端点](#api-端点)
+  - [聊天补全（OpenAI 格式）](#聊天补全openai-格式)
+  - [消息创建（Anthropic 格式）](#消息创建anthropic-格式)
+  - [SSE 流式响应](#sse-流式响应)
+  - [健康检查](#健康检查)
+- [内置工具](#内置工具)
+- [完整场景示例](#完整场景示例)
+- [内部接口参考](#内部接口参考)
+
+---
+
+## 概述
+
+synth-loop 提供与 OpenAI 和 Anthropic 完全兼容的 API，客户端只需修改 `base_url` 即可接入。
+
+**Base URL**: `http://localhost:13155`
+
+**支持的 API 格式**：
+
+| 格式 | 端点 | SDK |
+|------|------|-----|
+| OpenAI | `POST /v1/chat/completions` | `openai` Python/Node.js |
+| Anthropic | `POST /v1/messages` | `anthropic` Python/Node.js |
+| Packets | `POST /v1/packets` | HTTP JSON（上下文数据包提交） |
+
+**Content-Type**: `application/json`
+
+**工作模式**：
+
+| 模式 | 条件 | 行为 |
+|------|------|------|
+| 完整模式 | strata-match 可用 | 自动注入 Prompt + Tools + Assets |
+| 降级模式 | strata-match 不可用 | 使用默认 Prompt + 内置工具 |
+| 故障模式 | 降级也失败 | 使用兜底 Prompt，标记 error |
+
+**分形决策**：
+
+synth-loop 采用**分形 Prompt** 分级决策，按请求复杂度自动选择最经济的路径（v0_1_1: 6 级 a-f）：
+
+```
+请求 → 规则匹配（免费，<1ms，仅覆盖两端极值）
+  ├── "你好"/"hello" → chat（直答，零开销，~235 token）
+  └── "先.*再"/"分析并.*生成" → task_chain（任务链推进）
+
+规则未命中 → 分形Prompt（1次LLM调用，单字母输出）
+  ├── a → chat（直答）
+  ├── b → prompt_chat（调 strata-match）
+  ├── c → task（单次外部工具调用）
+  ├── d → sync_task（异步分支，依赖 async_tasks.enabled）
+  ├── e → task_chain（异步分支，多步骤任务链）
+  └── f → sync_task_chain（同步任务链）
+```
+
+### 会话管理（x-synthloop-session-id）
+
+v0_1_1 起 Header 更名为 `x-synthloop-session-id`（原 `x-gateway-session-id` 不再支持）。
+
+synth-loop 支持跨请求 Session 复用。客户端可通过自定义 HTTP Header `x-synthloop-session-id` 在多轮对话中保持会话状态。
+
+**使用方式**：
+
+| 轮次 | 客户端行为 | synth-loop 响应 |
+|------|-----------|-------------|
+| 首轮 | 不传 Header 或在 Header 中传空值 | 响应 Header 返回 `x-synthloop-session-id: <uuid>` |
+| 后续轮 | 请求 Header 带上 `x-synthloop-session-id: <uuid>` | 复用同一 Session，保持上下文和对话历史 |
+
+**cURL 示例**：
+
+```bash
+# 首轮：不传 Header
+curl -i http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"帮我查北京天气"}]}'
+# → 响应 Header: x-synthloop-session-id: 550e8400-e29b-41d4-a716-446655440000
+
+# 后续轮：带上 Session ID
+curl -i http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-synthloop-session-id: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"上海呢"}]}'
+```
+
+**注意**：Session 过期后（默认 3 天无活动）自动清理，需重新开始新 Session。
+
+---
+
+## 快速上手
+
+### 使用 OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:13155/v1",
+    api_key="any-string"  # synth-loop 不验证客户端 key
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}]
+```
+
+### 使用 Anthropic SDK
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://localhost:13155",
+    api_key="any-string"
+)
+
+response = client.messages.create(
+    model="claude-3-opus-20240229",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}]
+)
+print(response.content[0].text)
+```
+
+### 使用 cURL
+
+```bash
+# OpenAI 格式
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}]
+  }'
+
+# Anthropic 格式
+curl http://localhost:13155/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-opus-20240229",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}]
+  }'
+```
+
+---
+
+## 认证
+
+synth-loop 本身不验证客户端 API Key。客户端可以传递任意值作为 `api_key`。
+
+v0_1_1 起支持 `x-synthloop-user-id` Header 认证，三层行为（`auth.enabled` + `auth.required`）。默认关闭（`auth.enabled=false`），开箱即用。
+
+- **OpenAI 格式**：`Authorization: Bearer <any-string>`（可选）
+- **Anthropic 格式**：`x-api-key: <any-string>`（可选）
+- **用户认证**：`x-synthloop-user-id: sl-{uuid}`（v0_1_1 新增，可选）
+
+synth-loop 使用配置文件中的 `downstream_llm.api_key` 调用下游 LLM。
+
+---
+
+## 错误处理
+
+### 错误响应格式
+
+```json
+{
+  "error": {
+    "message": "错误描述",
+    "type": "error_type",
+    "code": "error_code"
+  }
+}
+```
+
+### HTTP 状态码
+
+| 状态码 | 说明 |
+|--------|------|
+| 200 | 成功 |
+| 400 | 请求参数错误 |
+| 500 | 内部服务器错误 |
+| 502 | 下游 LLM 调用失败 |
+| 503 | 服务不可用（所有降级策略耗尽） |
+
+### 降级行为
+
+| 场景 | 行为 |
+|------|------|
+| strata-match 超时 | 自动降级到默认 Prompt |
+| strata-match 返回错误 | 自动降级到默认 Prompt |
+| 工具调用失败 | 注入错误信息，LLM 自行处理 |
+| 工具连续失败 3 次 | 熔断，后续调用自动降级 |
+| 下游 LLM 不可用 | 返回 502 错误 |
+
+---
+
+## API 端点
+
+### 聊天补全（OpenAI 格式）
+
+```
+POST /v1/chat/completions
+```
+
+完全兼容 [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat)。
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| model | string | 是 | 模型名称（synth-loop 会使用配置的下游模型） |
+| messages | array | 是 | 消息数组 |
+| temperature | float | 否 | 采样温度（0-2） |
+| max_tokens | integer | 否 | 最大生成 token 数 |
+| tools | array | 否 | 工具定义（synth-loop 会合并动态工具） |
+| tool_choice | string | 否 | 工具选择策略 |
+| stream | boolean | 否 | 是否流式返回 |
+| packets | string[] | 否 | **v0_1_1 新增**：已提交到 `/v1/packets` 的 packet ID 列表 |
+| inline_data | object[] | 否 | **v0_1_1 新增**：降级模式下原始数据直接内联，无需先提交 |
+
+#### messages 数组
+
+| role | 说明 |
+|------|------|
+| system | 系统提示词（synth-loop 会与 strata-match 返回的 Prompt 合并） |
+| user | 用户消息 |
+| assistant | 助手消息 |
+| tool | 工具调用结果 |
+
+#### 请求示例
+
+```json
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 1000
+}
+```
+
+#### 响应示例
+
+```json
+{
+  "id": "chatcmpl-gw-001",
+  "object": "chat.completion",
+  "created": 1719312000,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "# 智能家居项目商业计划书\n\n## 一、项目概述\n\n本项目旨在打造一套全屋智能家居系统，通过物联网技术将家庭设备互联互通...\n\n## 二、市场分析\n\n随着5G和AI技术的普及，智能家居市场规模预计2026年将达到5000亿元..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 200,
+    "total_tokens": 350
+  }
+}
+```
+
+#### 带工具调用的响应
+
+当 synth-loop 注入了动态工具，LLM 可能返回工具调用：
+
+```json
+{
+  "id": "chatcmpl-gw-033",
+  "object": "chat.completion",
+  "created": 1719313920,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_weather_001",
+            "type": "function",
+            "function": {
+              "name": "api_weather_query",
+              "arguments": "{\"city\": \"北京\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 40,
+    "total_tokens": 190
+  }
+}
+```
+
+synth-loop 会自动执行工具调用，将结果注入推理循环，最终返回文本响应。
+
+---
+
+### 消息创建（Anthropic 格式）
+
+```
+POST /v1/messages
+```
+
+完全兼容 [Anthropic Messages API](https://docs.anthropic.com/en/api/messages)。
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| model | string | 是 | 模型名称 |
+| max_tokens | integer | 是 | 最大生成 token 数 |
+| messages | array | 是 | 消息数组 |
+| system | string | 否 | 系统提示词 |
+| temperature | float | 否 | 采样温度 |
+| tools | array | 否 | 工具定义 |
+| stream | boolean | 否 | 是否流式返回 |
+
+#### 请求示例
+
+```json
+{
+  "model": "claude-3-opus-20240229",
+  "max_tokens": 1024,
+  "system": "你是一个有帮助的AI助手。",
+  "messages": [
+    {"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}
+  ]
+}
+```
+
+#### 响应示例
+
+```json
+{
+  "id": "msg-gw-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "# 智能家居项目商业计划书\n\n## 一、项目概述\n\n本项目旨在打造一套全屋智能家居系统，通过物联网技术将家庭设备互联互通..."
+    }
+  ],
+  "model": "claude-3-opus-20240229",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 150,
+    "output_tokens": 200
+  }
+}
+```
+
+---
+
+### SSE 流式响应
+
+synth-loop 完整支持 OpenAI 和 Anthropic 双协议的 SSE（Server-Sent Events）流式输出。客户端只需在请求中设置 `stream: true`。
+
+#### OpenAI 格式 SSE
+
+**请求**：
+
+```bash
+curl -N http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "stream": true,
+    "messages": [{"role": "user", "content": "你好"}]
+  }'
+```
+
+**响应格式**（SSE data 行，逐块返回）：
+
+```
+data: {"id":"chatcmpl-gw-001","object":"chat.completion.chunk","created":1719312000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-gw-001","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"你"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-gw-001","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-gw-001","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"！"},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+#### Anthropic 格式 SSE
+
+Anthropic 协议使用 `event:` 行 + `data:` 行的格式：
+
+```
+event: message_start
+data: {"type":"message_start","message":{"id":"msg-gw-001","type":"message","role":"assistant","model":"claude-3-haiku-20240307","content":[],"usage":{"input_tokens":15,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"好"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+**注意事项**：
+- Anthropic 入口的模型名会通过 `anthropic_model_map` 自动映射为下游 OpenAI 模型
+- 分形决策 + strata-match 查询在首块输出前同步完成，不影响流式延迟
+- OpenAI → Anthropic 下游 SSE（即上游用 OpenAI 格式、下游用 Anthropic 模型）计划在后续版本支持
+
+---
+
+### 上下文数据包（v0_1_1 新增）
+
+```
+POST /v1/packets
+```
+
+提交上下文数据包。调用方可在 `/v1/chat/completions` 或 `/v1/messages` 之前先提交数据包，之后在请求中通过 `packets:[id]` 引用，数据经预处理器生成摘要后自动注入 system prompt。
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| source | string | 是 | 来源标识符（`browser` / `im` / `mini-program` / `esp32` / ...） |
+| type | string | 是 | packet 类型（见 type 注册表） |
+| payload | object | 是 | 按 type 定义的数据体 |
+| meta | object | 否 | 附加元数据 |
+
+#### 约束
+
+| 约束 | 值 |
+|------|-----|
+| 单 packet 最大体积 | 5 MB |
+| packet TTL | 默认 30 分钟（可配置 `packets.ttl_seconds`） |
+| 未知 type | 400 |
+| 超体积 | 413 |
+
+**type 注册表**：`browser_dom` / `browser_selection` / `browser_meta` / `browser_structure` / `browser_audio` / `wechat_context` / `im_thread` / `im_message_history` / `packet_consent` / `aiot_sensor` / `device_status` / `rpi_sensor`(预留) / `camera_frame`(预留)
+
+#### 请求示例
+
+```json
+{
+  "source": "browser",
+  "type": "browser_dom",
+  "payload": {
+    "html": "<html><title>示例页面</title><body><h1>标题</h1><p>正文内容...</p></body></html>"
+  }
+}
+```
+
+#### 响应示例
+
+```json
+{
+  "packet_id": "pkt_a1b2c3d4e5f6g7h8"
+}
+```
+
+#### 使用流程
+
+```
+1. POST /v1/packets → packet_id
+2. POST /v1/chat/completions { "packets":["pkt_xxx"], "messages":[...] }
+   → synth-loop 从 PacketStore 取 packet → 预处理器提取摘要 → 注入 system prompt
+```
+
+`/v1/messages`（Anthropic 格式）同样支持 `packets` 和 `inline_data` 字段。
+
+#### 降级路径
+
+| 场景 | 行为 |
+|------|------|
+| packet 已过期（TTL 超） | 忽略该 ID，不阻塞请求 |
+| packet type 无对应预处理器 | 跳过预处理，注入原始 payload 截断版（≤200 字符） |
+| PacketStore 异常 | 跳过所有 packet 注入，仅处理 inline_data |
+| `packets.enabled=false` | packets/inline_data 静默忽略 |
+
+---
+
+### 健康检查
+
+```
+GET /health
+```
+
+检查服务健康状态。
+
+#### 响应示例
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "active_sessions": 42
+}
+```
+
+---
+
+### 任务管理（v0_1_1 新增）
+
+#### GET /api/v1/tasks/{task_id}
+
+查询异步任务状态（仅返回状态，不含结果内容）。
+
+**响应示例**：
+
+```json
+{
+  "id": "Task-a1b2c3d4-synthloop",
+  "status": "running",
+  "session_id": "550e8400",
+  "user_id": "sl-test-001",
+  "created_at": "2026-07-06T10:00:00",
+  "updated_at": "2026-07-06T10:01:00"
+}
+```
+
+#### POST /api/v1/tasks/{task_id}/cancel
+
+取消异步任务。任务状态变为 `cancelled`，TaskChainExecutor 在下一步前中断。
+
+**响应**：200
+
+```json
+{
+  "id": "Task-a1b2c3d4-synthloop",
+  "status": "cancelled"
+}
+```
+
+### 用户管理（v0_1_1 新增）
+
+#### /admin/users
+
+用户管理页面（HTML）。支持创建 `sl-{uuid}` 用户、启用/禁用、删除。创建用户时自动联动注册到 strata-match 的 `sm-{uuid}`。
+
+### 消息前置检查（v0_1_1 新增）
+
+在 dispatch 之前，synth-loop 对用户消息执行两条前置规则：
+
+| 规则 | 匹配模式 | 行为 |
+|------|---------|------|
+| Task-ID 查询 | `Task-(.+)-synthloop` | 查 tasks 表，返回结果或"任务不存在"，终点 |
+| user-memory 提取 | `<user-memory>...</user-memory>` | 提取内容写入 Session 永久区，继续 dispatch |
+
+---
+
+## 内置工具
+
+synth-loop 始终注册以下内置工具，即使 strata-match 不可用：
+
+### select_system_prompt
+
+根据用户意图选择最合适的专家人设 Prompt。
+
+```json
+{
+  "name": "select_system_prompt",
+  "description": "根据用户意图选择最合适的专家人设",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "需要匹配意图的文本"
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+### load_document_to_context
+
+加载文档到永久上下文区。
+
+```json
+{
+  "name": "load_document_to_context",
+  "description": "加载文档到永久上下文区",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "doc_name": {
+        "type": "string",
+        "description": "文档名称（无需路径）"
+      },
+      "chapter": {
+        "type": "string",
+        "description": "指定章节或键名（可选）"
+      }
+    },
+    "required": ["doc_name"]
+  }
+}
+```
+
+### unload_document_from_context
+
+从永久上下文中卸载文档。
+
+```json
+{
+  "name": "unload_document_from_context",
+  "description": "从永久上下文中卸载文档",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "doc_id": {
+        "type": "string",
+        "description": "要卸载的文档ID，由 load_document_to_context 返回"
+      }
+    },
+    "required": ["doc_id"]
+  }
+}
+```
+
+### discover_textcli
+
+发现 text-cli 可用指令，支持关键词过滤。
+
+```json
+{
+  "name": "discover_textcli",
+  "description": "发现 text-cli 可用指令",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "关键词过滤（可选）"
+      },
+      "format": {
+        "type": "string",
+        "description": "返回格式（可选，默认 compact）"
+      }
+    }
+  }
+}
+```
+
+### manage_context
+
+按标签管理永久区上下文（load/unload/list/refresh）。
+
+```json
+{
+  "name": "manage_context",
+  "description": "按标签管理永久区上下文",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["load", "unload", "list", "refresh"],
+        "description": "操作类型"
+      },
+      "tags": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "标签列表"
+      }
+    },
+    "required": ["action"]
+  }
+}
+```
+
+### call_textcli
+
+调用 text-cli 指令执行操作。
+
+```json
+{
+  "name": "call_textcli",
+  "description": "调用 text-cli 指令",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "text-cli 指令，格式：AI:域;动作,参数"
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "节点地址（可选，默认自动路由）"
+      }
+    },
+    "required": ["prompt"]
+  }
+}
+```
+
+---
+
+## 完整场景示例
+
+> 以下示例展示 synth-loop 在不同场景下的完整请求/响应。
+
+### 场景 1：纯 Prompt 增强
+
+**请求**：
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}
+    ]
+  }'
+```
+
+**synth-loop 内部流程**：
+1. 调用 strata-match → 返回专家人设 Prompt
+2. 注入到 System Prompt
+3. 调用下游 LLM
+
+**响应**：
+```json
+{
+  "id": "chatcmpl-gw-001",
+  "object": "chat.completion",
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "# 智能家居项目商业计划书\n\n## 一、项目概述\n\n本项目旨在打造一套全屋智能家居系统，通过物联网技术将家庭设备互联互通...\n\n## 二、市场分析\n\n随着5G和AI技术的普及，智能家居市场规模预计2026年将达到5000亿元..."
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+### 场景 2：Prompt + 工具调用
+
+**请求**：
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "帮我查一下北京今天的天气"}
+    ]
+  }'
+```
+
+**synth-loop 内部流程**：
+1. 调用 strata-match → 返回 Prompt + 天气查询工具
+2. 工具适配并注入
+3. LLM 决定调用工具
+4. synth-loop 执行工具，结果注入推理
+5. LLM 基于结果生成回答
+
+**最终响应**：
+```json
+{
+  "id": "chatcmpl-gw-034",
+  "object": "chat.completion",
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "北京今天的天气情况：\n\n**当前天气：**\n- 天气：晴\n- 温度：28°C\n- 湿度：65%\n- 风向：东南风 3级\n\n**温馨提示：**\n今天天气晴朗，温度适中，适合外出活动。"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+### 场景 3：Prompt + 资源
+
+**请求**：
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "生成毕加索风格的人体图"}
+    ]
+  }'
+```
+
+**synth-loop 内部流程**：
+1. 调用 strata-match → 返回 Prompt + Assets（风格参考图 + 人体骨架图）
+2. 无工具 → 资源独立注入上下文
+3. LLM 知道资源存在，可引用 URL
+
+**响应**：
+```json
+{
+  "id": "chatcmpl-gw-004",
+  "object": "chat.completion",
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "我来帮你生成毕加索风格的人体图。\n\n**可用资源：**\n1. 毕加索立体主义风格参考图：https://assets.example.com/picasso_style.png\n2. 站立姿势人体骨架图：https://assets.example.com/standing_pose.json\n\n**生成建议：**\n- 使用毕加索风格参考图作为风格基准\n- 参考站立姿势骨架图进行人体结构构建\n- 采用立体主义的几何分解手法"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+### 场景 4：多轮对话
+
+**第 1 轮**：同场景 2
+
+**第 2 轮**：
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [
+      {"role": "user", "content": "帮我查一下北京今天的天气"},
+      {"role": "assistant", "content": "北京今天晴，28°C..."},
+      {"role": "user", "content": "上海呢"}
+    ]
+  }'
+```
+
+**synth-loop 行为**：
+- 检测到多轮对话
+- 保持之前的工具注入
+- LLM 自动理解"上海呢"指的是查询上海天气
+
+**响应**：
+```json
+{
+  "id": "chatcmpl-gw-036",
+  "object": "chat.completion",
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "上海今天的天气情况：\n\n**当前天气：**\n- 天气：多云\n- 温度：32°C\n- 湿度：75%\n- 风向：南风 2级\n\n**两地对比：**\n| 城市 | 温度 | 天气 | 湿度 |\n|------|------|------|------|\n| 北京 | 28°C | 晴 | 65% |\n| 上海 | 32°C | 多云 | 75% |"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+### 场景 5：Anthropic 格式
+
+**请求**：
+```bash
+curl http://localhost:13155/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-opus-20240229",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "帮我写一份智能家居项目的商业计划书"}
+    ]
+  }'
+```
+
+**synth-loop 内部流程**：
+1. 检测 Anthropic 格式
+2. 转译为内部格式
+3. 执行与 OpenAI 格式相同的增强流程
+4. 将结果转译回 Anthropic 格式
+
+**响应**：
+```json
+{
+  "id": "msg-gw-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "# 智能家居项目商业计划书\n\n## 一、项目概述\n\n本项目旨在打造一套全屋智能家居系统..."
+    }
+  ],
+  "model": "claude-3-opus-20240229",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 150,
+    "output_tokens": 200
+  }
+}
+```
+
+---
+
+## 内部接口参考
+
+> 以下接口用于 synth-loop 与 strata-match 之间的通信，仅供参考。
+
+### synth-loop → strata-match
+
+#### POST /api/v1/query
+
+**请求**（完整格式，含任务执行上下文）：
+
+```json
+{
+  "user_ask": "帮我写一份智能家居项目的商业计划书",
+  "types": "role_play",
+  "subtypes": "document_writing",
+  "context": {"job_id": "sg-chain-001", "step": 1}
+}
+```
+
+**响应**：
+
+```json
+{
+  "primary_prompt": "你是一位资深的商业顾问和创业计划专家...",
+  "candidates": [],
+  "matched_tags": ["商业", "计划书", "智能家居"],
+  "matched_skills_tags": ["financial_projection", "market_analysis"],
+  "user_ask": "帮我写一份智能家居项目的商业计划书",
+  "category": "role_play",
+  "subtype": "document_writing",
+  "tools": [],
+  "assets": []
+}
+```
+
+**请求字段说明**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| user_ask | string | 是 | 用户原始提问 |
+| types | string | 否 | 主类别（如 `role_play`, `tool_use`，可选） |
+| subtypes | string | 否 | 子类别，由 synth-loop 的 LogicAbstractor 判定（如 `document_writing`） |
+| context | object | 否 | 任务执行上下文（含 `job_id` 和 `step`，用于任务链场景） |
+
+**响应字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| matched_skills_tags | skills-tags 二级匹配结果，用于按细分领域增强 Prompt |
+| subtype | strata-match 返回的确认子类别 |
+
+**tools 字段格式**：
+```json
+{
+  "tools": [
+    {
+      "name": "tc_math_eval",
+      "name_cn": "数学计算",
+      "subtype": "textcli",
+      "description": "计算数学表达式",
+      "description_cn": "计算数学表达式",
+      "definition": {"command": "AI:tc-math;eval,{expression}"},
+      "params": ["expression"],
+      "tags": ["数学"],
+      "weight": 1.0
+    }
+  ]
+}
+```
+
+**assets 字段格式**：
+```json
+{
+  "assets": [
+    {
+      "name": "picasso_style",
+      "name_cn": "毕加索风格",
+      "subtype": "image_style",
+      "described_cn": "毕加索立体主义风格参考图",
+      "url": "https://assets.example.com/picasso_style.png",
+      "tags": ["毕加索", "picasso", "立体主义"],
+      "weight": 1.0
+    }
+  ]
+}
+```
+
+详细接口文档请参阅 [strata-match API.md](../../strata-match/docs/API.md)。
+
+### synth-loop → text-cli
+
+#### POST /text-cli/cli
+
+**请求**：
+```json
+{
+  "prompt": "AI:text-cli;query,compact"
+}
+```
+
+**响应**：
+```json
+{
+  "rst_types": "text",
+  "rst_data": {
+    "text": "AI:tc-datetime;now - 获取当前时间\nAI:tc-math;eval,<表达式> - 数学计算\n..."
+  }
+}
+```
+
+---
+
+## 配置参考
+
+完整配置项请参阅 [README.md](../../README.md#配置) 和 [设计文档](./design_zh.md#七配置与持久化设计)。
+
+关键配置：
+
+```yaml
+downstream_llm:
+  api_base: "https://api.deepseek.com"          # 下游 LLM API 地址
+  api_key: "your-api-key"                       # 下游 LLM API Key
+  default_model: "deepseek-v4-flash"            # 默认模型
+
+strata_match:
+  url: "http://localhost:13156"                  # strata-match 服务地址
+  mock: false                                    # Mock 模式（true=不依赖 strata-match 服务）
+
+textcli:
+  default_endpoint: "http://10.168.1.151/text-cli/cli"  # text-cli 默认节点
+
+packets:
+  enabled: true                     # packets API 总开关
+  ttl_seconds: 1800                 # packet TTL（默认 30 分钟）
+  max_packet_size_mb: 5             # 单 packet 最大体积
+  max_packets_per_request: 20       # 单次请求最多引用的 packet 数
+```
+
+---
+
+*文档版本：v1.0*
+*更新时间：2026-07-06 | v0_1_1 新增端点*

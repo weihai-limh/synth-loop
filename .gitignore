@@ -1,0 +1,22 @@
+# Runtime data
+src/data/
+*.db
+events.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Internal docs
+.dev/
+
+# Environment
+.env
+.env.local
