@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v1.0 | **日期**：2026-07-15
+> **版本**：v0.1.2 | **日期**：2026-07-23
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -80,7 +80,7 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 |------|------|------|
 | OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions` |
 | Anthropic 入口 | `anthropic_chat.py` — 请求翻译 + dispatch | `/v1/messages` |
-| 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`（v0_1_1 新增） |
+| 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`（v0.1.1 新增） |
 | 健康检查 | `health.py` | `/health` |
 | 异步任务 API | `tasks.py` — GET + POST cancel | `/api/v1/tasks/{id}` |
 | 管理面板 | `admin.py` — HTML 页面路由 | `/admin/sessions` 等 |
@@ -108,8 +108,8 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
 | Job 存储 | `job_store.py` | 跨组件 Job 协同 |
-| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0_1_1 新增） |
-| 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0_1_1 新增） |
+| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0.1.1 新增） |
+| 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0.1.1 新增） |
 
 ### 3.3 工具层（`src/app/tools/`）
 
@@ -215,7 +215,7 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 |------|------|------|------|------|
 | `/v1/chat/completions` | OpenAI | POST | 无（可选 Bearer） | `chat.py` |
 | `/v1/messages` | Anthropic | POST | 无（可选 x-api-key） | `anthropic_chat.py` |
-| `/v1/packets` | JSON | POST | 无 | `packets.py`（v0_1_1） |
+| `/v1/packets` | JSON | POST | 无 | `packets.py`（v0.1.1） |
 | `/health` | JSON | GET | 无 | `health.py` |
 | `/admin/sessions` | HTML | GET | 无 | `admin.py` |
 | `/admin/tasks` | HTML | GET | 无 | `admin.py` |
@@ -284,7 +284,7 @@ src/
 | `auth` | `config.yaml` | enabled=false, required=false | `middleware/auth.py` |
 | `session_memory` | `config.yaml` | enabled=true | `routers/chat.py` |
 | `async_tasks` | `config.yaml` | enabled=false, max_per_user=3 | `routers/chat.py` |
-| `packets` | `config.yaml` | enabled=true, ttl_seconds=1800 | `packet_store.py`（v0_1_1） |
+| `packets` | `config.yaml` | enabled=true, ttl_seconds=1800 | `packet_store.py`（v0.1.1） |
 | `endpoints` | `model_config.yaml` | 端点池定义 | `execution_router.py` |
 | `llm_routing` | `model_config.yaml` | 路由映射 | `execution_router.py` |
 | `rules` | `complexity_rules.yaml` | chat/task_chain 规则 | `complexity_classifier.py` |
@@ -295,8 +295,8 @@ src/
 |----|------|------|:---------:|
 | `session_snapshots` | `gateway.db` | 会话持久化（permanent_system_prompt, temp_history, snapshot） | 无 |
 | `events` | `events.jsonl` | 事件日志 | 无 |
-| `users` | `gateway.db` | 用户认证（v0_1_1） | 无 |
-| `tasks` | `gateway.db` | 异步任务（v0_1_1） | 无 |
+| `users` | `gateway.db` | 用户认证（v0.1.1） | 无 |
+| `tasks` | `gateway.db` | 异步任务（v0.1.1） | 无 |
 
 ---
 
@@ -370,8 +370,9 @@ src/
 | 版本 | 验收标准 | 里程碑定位 |
 |------|---------|-----------|
 | v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | 基线版本——功能完整度 |
-| v0_1_1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
-| v0.2（规划） | 异步执行器 + 质量反馈分析 | 闭环版本——骨架填肉 |
+| v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
+| v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道大脑 |
+| v0.2（规划） | 质量反馈分析 + 路由准确率可观测 | 闭环版本——骨架填肉 |
 
 ---
 
@@ -397,15 +398,14 @@ src/
 
 ## 十三、架构预留
 
-以下能力已在架构中定义设计位，当前版本未实现，计划在后续版本交付。与"技术债"不同——这些不是已实现但需要修复的代码，而是架构中已明确预留但尚未建设的模块。
+以下能力计划在后续版本交付：
 
-| 能力 | 架构中的设计位 | 涉及的组件 | 计划版本 |
-|------|------|------|:---:|
-| PipelineSession | 管道会话状态模型——记录从想法到落地的全部相位状态、累积上下文、质量门禁、异步任务追踪 | `src/app/models/`（新增模型）、`src/app/services/session_manager.py`（扩展） | v0.2+ |
-| 计划编译器 | 将计划配置（相位列表、模式分配）编译为 text-cli 路径 JSON | `src/app/services/`（新增服务） | v0.2+ |
-| 相位感知上下文注入 | 每相位执行时根据 `{phase, intent, available_tools}` 动态生成策略 + 累积上下文注入 | `src/app/services/context_injector.py`（扩展）、`src/app/services/strata_match_client.py`（扩展） | v0.2+ |
-| 异步任务后台执行器 | 异步任务的独立执行线程，替代当前骨架阶段的同步查询模式 | `src/app/services/task_chain_executor.py`（扩展） | v0.2 |
-| 路由准确率可观测 | 分形决策路由的准确性指标收集与可视化 | `src/app/services/execution_router.py`（扩展）、管理面板 | v0.2 |
+| 能力 | 架构中的设计位 | 计划版本 |
+|------|------|:---:|
+| 制品收集 CDN 落地 | 管道每相位产出物经 CDN 分发 | v0.1.3 |
+| 物理安全/人授权激活 | 物理操作相位的播片审批 + 安全规则 | v0.1.3 |
+| 路由准确率可观测 | 分形决策路由的准确性指标收集与可视化 | v0.2 |
+| 质量反馈分析 | feedback 数据沉淀后的分析优化逻辑 | v0.2 |
 
 ---
 

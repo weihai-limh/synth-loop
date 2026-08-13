@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
 
-@router.get("/{task_id}", summary="查询任务状态")
+@router.get("/{task_id}", summary="Query task status")
 async def get_task_status(task_id: str) -> dict[str, Any]:
     """仅返回状态，不含结果内容"""
     task = await get_task(task_id)
@@ -28,7 +28,7 @@ async def get_task_status(task_id: str) -> dict[str, Any]:
     }
 
 
-@router.post("/{task_id}/cancel", summary="取消任务")
+@router.post("/{task_id}/cancel", summary="Cancel task")
 async def cancel_task(task_id: str) -> dict[str, Any]:
     """取消任务——设置 status=cancelled"""
     db_path = get_db_path()

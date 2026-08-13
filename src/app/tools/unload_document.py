@@ -40,7 +40,7 @@ async def handle_unload_document(
     doc_id = args.get("doc_id", "")
 
     if not doc_id:
-        return {"status": "error", "message": "doc_id 参数不能为空"}
+        return {"status": "error", "message": "doc_id parameter cannot be empty"}
 
     # 过滤掉指定文档
     original_count = len(session.loaded_docs)

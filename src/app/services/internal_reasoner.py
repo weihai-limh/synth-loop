@@ -50,7 +50,7 @@ class InternalReasoner:
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
             return json.loads(content)
         except:
-            return {"passed": True, "feedback": "验证跳过"}
+            return {"passed": True, "feedback": "verification skipped"}
 
     async def summarize(self, all_results: list[dict], llm, **kwargs) -> str:
         """汇总全部步骤的结果"""
@@ -66,7 +66,7 @@ class InternalReasoner:
         ]
         try:
             result = await llm.chat(messages=messages, **kwargs)
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "汇总完成")
+            return result.get("choices", [{}])[0].get("message", {}).get("content", "Summary complete")
         except:
             return "\n".join(r.get("summary", "") for r in all_results)
 
@@ -79,4 +79,4 @@ class InternalReasoner:
             l = re.sub(r'^\d+[\.\)、]\s*', '', l)
             if l:
                 steps.append(l)
-        return steps if steps else ["执行任务"]
+        return steps if steps else ["Execute task"]

@@ -44,12 +44,12 @@ class DegradationManager:
         """
         # 检查是否处于故障模式
         if self._is_in_failure_mode():
-            logger.warning("当前处于故障模式，使用降级模式")
+            logger.warning("Currently in failure mode, falling back to degraded mode")
             try:
                 result = await degraded_mode_func(*args, **kwargs)
                 return result, DegradationLevel.DEGRADED
             except Exception as e:
-                logger.error(f"降级模式也失败: {e}")
+                logger.error(f"Degraded mode also failed: {e}")
                 result = await failure_mode_func(*args, **kwargs)
                 return result, DegradationLevel.FAILURE
         
@@ -59,7 +59,7 @@ class DegradationManager:
             self._record_success()
             return result, DegradationLevel.FULL
         except Exception as e:
-            logger.warning(f"完整模式失败: {e}")
+            logger.warning(f"Full mode failed: {e}")
             self._record_failure()
             
             # 尝试降级模式
@@ -67,7 +67,7 @@ class DegradationManager:
                 result = await degraded_mode_func(*args, **kwargs)
                 return result, DegradationLevel.DEGRADED
             except Exception as e2:
-                logger.error(f"降级模式也失败: {e2}")
+                logger.error(f"Degraded mode also failed: {e2}")
                 result = await failure_mode_func(*args, **kwargs)
                 return result, DegradationLevel.FAILURE
     
@@ -89,12 +89,12 @@ class DegradationManager:
         import time
         self._failure_count += 1
         self._last_failure_time = time.time()
-        logger.warning(f"记录失败，当前失败次数: {self._failure_count}")
+        logger.warning(f"Recorded failure, current failure count: {self._failure_count}")
     
     def _record_success(self) -> None:
         """记录成功"""
         self._failure_count = 0
-        logger.info("记录成功，重置失败计数器")
+        logger.info("Recorded success, reset failure counter")
     
     def reset(self) -> None:
         """重置状态"""
@@ -129,7 +129,7 @@ class SmartPromptDegradation:
         async def full_mode():
             result = await strata_match_client.query(user_query)
             if not result or not result.get("primary_prompt"):
-                raise ValueError("strata-match 返回空结果")
+                raise ValueError("strata-match returned empty result")
             return result
         
         # 降级模式：使用默认 Prompt
@@ -138,7 +138,7 @@ class SmartPromptDegradation:
                 "primary_prompt": default_prompt,
                 "tools": [],
                 "assets": [],
-                "degradation_reason": "strata-match 不可用"
+                "degradation_reason": "strata-match unavailable"
             }
         
         # 故障模式：返回错误
@@ -147,7 +147,7 @@ class SmartPromptDegradation:
                 "primary_prompt": default_prompt,
                 "tools": [],
                 "assets": [],
-                "degradation_reason": "系统故障",
+                "degradation_reason": "system failure",
                 "error": True
             }
         
@@ -159,7 +159,7 @@ class SmartPromptDegradation:
         
         prompt_text = result.get("primary_prompt", default_prompt)
         
-        logger.info(f"策略获取完成，降级级别: {level}")
+        logger.info(f"Strategy acquisition complete, degradation level: {level}")
         
         return prompt_text, level, result
 

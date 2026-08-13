@@ -19,7 +19,7 @@ class StrataMatchClient:
         self.mock = mock
         self.client = httpx.AsyncClient(timeout=timeout)
         self.cache = {}
-        logger.info(f"StrataMatchClient 初始化: url={url}, mock={mock}")
+        logger.info(f"StrataMatchClient initialized: url={url}, mock={mock}")
     
     async def query(self, user_ask: str, types: str = None, subtypes: str = None) -> dict:
         """查询 strata-match（v0.1 支持 subtypes 过滤）"""
@@ -33,7 +33,7 @@ class StrataMatchClient:
         cache_key = f"{user_ask}:{types}:{subtypes}"
         cached = self._get_cache(cache_key)
         if cached:
-            logger.info(f"StrataMatchClient 缓存命中: {cache_key}")
+            logger.info(f"StrataMatchClient cache hit: {cache_key}")
             return cached
         
         # 调用服务
@@ -54,10 +54,10 @@ class StrataMatchClient:
             # 缓存结果
             self._set_cache(cache_key, result)
             
-            logger.info(f"StrataMatchClient.query 成功: matched_skills={result.get('matched_skills_tags', [])}")
+            logger.info(f"StrataMatchClient.query succeeded: matched_skills={result.get('matched_skills_tags', [])}")
             return result
         except Exception as e:
-            logger.error(f"StrataMatchClient.query 失败: {e}")
+            logger.error(f"StrataMatchClient.query failed: {e}")
             raise
     
     def _get_cache(self, key: str) -> Optional[dict]:

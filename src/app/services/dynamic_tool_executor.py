@@ -43,7 +43,7 @@ class DynamicToolExecutor:
         elif subtype == "sdk":
             return await self._execute_sdk(tool_meta, arguments)
         else:
-            return {"status": "error", "message": f"不支持的工具类型: {subtype}"}
+            return {"status": "error", "message": f"Unsupported tool type: {subtype}"}
     
     async def _execute_textcli(
         self,
@@ -64,7 +64,7 @@ class DynamicToolExecutor:
         # 构建 text-cli 指令
         prompt = f"AI:{command}"
         
-        logger.info(f"执行 textcli 工具: {prompt}")
+        logger.info(f"Executing textcli tool: {prompt}")
         
         try:
             textcli_client = get_textcli_client()
@@ -76,7 +76,7 @@ class DynamicToolExecutor:
                 "rst_data": result.get("rst_data", {})
             }
         except Exception as e:
-            logger.error(f"textcli 工具执行失败: {e}")
+            logger.error(f"textcli tool execution failed: {e}")
             return {"status": "error", "message": str(e)}
     
     async def _execute_mcp(
@@ -92,14 +92,14 @@ class DynamicToolExecutor:
         original = tool_meta.get("original", {})
         name = original.get("name", "")
         
-        logger.info(f"执行 MCP 工具: {name}, 参数: {arguments}")
+        logger.info(f"Executing MCP tool: {name}, args: {arguments}")
         
         # TODO: 实现 MCP 协议调用
         # 这里需要根据实际的 MCP 服务器地址和协议来实现
         # 暂时返回模拟结果
         return {
             "status": "error",
-            "message": "MCP 工具执行尚未实现"
+            "message": "MCP tool execution not yet implemented"
         }
     
     async def _execute_api(
@@ -115,10 +115,10 @@ class DynamicToolExecutor:
         endpoint = tool_meta.get("endpoint", "")
         method = tool_meta.get("method", "POST").upper()
         
-        logger.info(f"执行 API 工具: {method} {endpoint}, 参数: {arguments}")
+        logger.info(f"Executing API tool: {method} {endpoint}, args: {arguments}")
         
         if not endpoint:
-            return {"status": "error", "message": "API endpoint 未配置"}
+            return {"status": "error", "message": "API endpoint not configured"}
         
         try:
             if method == "GET":
@@ -139,13 +139,13 @@ class DynamicToolExecutor:
                 "data": response.json()
             }
         except httpx.HTTPStatusError as e:
-            logger.error(f"API 工具执行失败: HTTP {e.response.status_code}")
+            logger.error(f"API tool execution failed: HTTP {e.response.status_code}")
             return {
                 "status": "error",
                 "message": f"HTTP {e.response.status_code}: {e.response.text}"
             }
         except Exception as e:
-            logger.error(f"API 工具执行失败: {e}")
+            logger.error(f"API tool execution failed: {e}")
             return {"status": "error", "message": str(e)}
     
     async def _execute_sdk(
@@ -160,14 +160,14 @@ class DynamicToolExecutor:
         """
         sdk_type = tool_meta.get("sdk_type", "")
         
-        logger.info(f"执行 SDK 工具: {sdk_type}, 参数: {arguments}")
+        logger.info(f"Executing SDK tool: {sdk_type}, args: {arguments}")
         
         # TODO: 实现 SDK 调用
         # 这里需要根据 SDK 类型来实现
         # 暂时返回模拟结果
         return {
             "status": "error",
-            "message": f"SDK 工具执行尚未实现: {sdk_type}"
+            "message": f"SDK tool execution not yet implemented: {sdk_type}"
         }
     
     async def close(self):

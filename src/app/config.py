@@ -1,5 +1,6 @@
 """配置管理模块"""
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -7,12 +8,41 @@ from typing import Any
 import yaml
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 # ── 项目路径常量 ──────────────────────────────────────────
 # src/app/config.py → .parent=src/app/ → .parent.parent=src/ → .parent.parent.parent=项目根
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 DATA_DIR = SRC_DIR / "data"
 DEPLOY_DIR = PROJECT_ROOT / "deploy"
+CONFIG_DIR = SRC_DIR / "config"
+
+# ── v0_1_2: Fractal Prompt 配置化 ─────────────────────────
+FRACTAL_PROMPT_PATH = CONFIG_DIR / "fractal_prompt.txt"
+
+# 内置默认值（文件不存在时的回退）
+_FRACTAL_PROMPT_DEFAULT = (
+    "Always use the same language as the user's latest message unless user explicitly asks.\n\n"
+    "You are a request classifier. Respond with EXACTLY ONE letter:\n\n"
+    "a - Simple greeting, weather, chit-chat. Direct answer, no enhancement.\n"
+    "b - Professional task (writing, coding, analysis). Needs prompt enhancement.\n"
+    "c - Single external tool or agent call.\n"
+    "d - Single synchronous task. Quick to complete, immediate response.\n"
+    "e - Multi-step task chain. Plan → execute → verify → summarize.\n"
+    "f - Synchronous task chain. All steps complete quickly.\n\n"
+    'User message: """{user_message}"""\n\n'
+    "Respond with ONLY the letter, nothing else."
+)
+
+
+def load_fractal_prompt() -> str:
+    """v0_1_2: 从文件加载分形分类 Prompt，文件不存在时使用内置默认 + WARNING"""
+    if FRACTAL_PROMPT_PATH.exists():
+        with open(FRACTAL_PROMPT_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    logger.warning(f"Fractal prompt file not found: {FRACTAL_PROMPT_PATH}, using built-in default")
+    return _FRACTAL_PROMPT_DEFAULT
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:

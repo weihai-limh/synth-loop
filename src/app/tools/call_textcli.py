@@ -15,11 +15,11 @@ async def handle_call_textcli(session, args: dict) -> dict:
     logger.info(f"handle_call_textcli: prompt={prompt}, endpoint={endpoint}")
     
     if not prompt:
-        return {"status": "error", "message": "prompt 参数不能为空"}
+        return {"status": "error", "message": "prompt parameter cannot be empty"}
     
     # 验证指令格式
     if not prompt.startswith("AI:"):
-        return {"status": "error", "message": "指令格式错误，必须以 'AI:' 开头"}
+        return {"status": "error", "message": "Invalid instruction format, must start with 'AI:'"}
     
     # 调用 text-cli
     try:
@@ -30,7 +30,7 @@ async def handle_call_textcli(session, args: dict) -> dict:
         rst_types = result.get("rst_types", "")
         rst_data = result.get("rst_data", {})
         
-        logger.info(f"handle_call_textcli 成功: rst_types={rst_types}")
+        logger.info(f"handle_call_textcli succeeded: rst_types={rst_types}")
         
         return {
             "status": "success",
@@ -38,7 +38,7 @@ async def handle_call_textcli(session, args: dict) -> dict:
             "rst_data": rst_data
         }
     except Exception as e:
-        logger.error(f"handle_call_textcli 失败: {e}")
+        logger.error(f"handle_call_textcli failed: {e}")
         return {"status": "error", "message": str(e)}
 
 
