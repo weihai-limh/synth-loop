@@ -1,0 +1,30 @@
+# synth-loop Docker Compose
+#
+# 使用方式：
+#   docker compose -f deploy/container/docker-compose.yml up -d
+#
+# 环境变量：
+#   OPENAI_API_KEY - 下游 LLM API Key（必填）
+
+version: "3.8"
+
+services:
+  synth-loop:
+    build:
+      context: ../..
+      dockerfile: deploy/container/Dockerfile
+    image: synth-loop:latest
+    ports:
+      - "13155:13155"
+    volumes:
+      - synth-loop-data:/app/src/data
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13155/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  synth-loop-data:

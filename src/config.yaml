@@ -1,0 +1,125 @@
+server:
+  host: "0.0.0.0"
+  port: 13155
+
+database:
+  path: "data/gateway.db"
+
+model_config_path: "./model_config.yaml"
+
+session:
+  max_temp_messages: 20
+  snapshot_interval: 5
+  expire_days: 3
+
+downstream_llm:
+  api_base: "https://api.deepseek.com"
+  api_key: "your-api-key"
+  default_model: "deepseek-v4-flash"
+  timeout: 30
+  max_retries: 0
+
+strata_match:
+  url: "http://localhost:13156"
+  timeout: 5
+  cache_ttl: 3600
+  mock: false  # 联调阶段使用真实服务
+
+# v0.5 新增配置段
+upstream_filter:
+  enabled: true
+  char_threshold: 5000  # system消息超过此字符数触发过滤
+
+dispatch:
+  default_complexity: "prompt_chat"  # chat / prompt_chat / task_chain
+  complexity_rules_path: "./complexity_rules.yaml"
+
+monitoring:
+  enabled: false  # 默认关闭，通过API动态开启
+  events_path: "data/events.jsonl"
+  max_events_per_session: 1000
+
+analysis:
+  enabled: false
+
+admin:
+  enabled: true
+
+job_store:
+  enabled: true
+
+textcli:
+  endpoints:
+    - url: "http://10.168.1.151/text-cli/cli"
+      name: "本机"
+      capabilities: ["基础", "密钥", "IM", "Git", "防火墙", "NAS"]
+  default_endpoint: "http://10.168.1.151/text-cli/cli"
+  timeout: 10
+
+# _a P2.1: 运行时表（tc 消费链路配置面）——旧 textcli.endpoints 配置迁移至此
+runtime_endpoints:
+  enabled: true
+  default_alias: "home-service"   # 全局默认端点（指令优先语义：无 alias/未知 alias 兜底）
+  seeds:
+    - alias: "home-service"
+      kind: "runtime"
+      url: "http://10.168.1.151/text-cli/cli"
+      auth: "none"                # 内网匿名
+      rank: 1
+    - alias: "cloud-endpoint"
+      kind: "endpoint"
+      url: "https://tide.agentbot.space/text-cli/cli"
+      auth: "dual"
+      access_token: "${TIDE_ACCESS_TOKEN}"
+      service_token: "${TIDE_SERVICE_TOKEN}"
+      rank: 2
+      trust: "community"
+
+
+tools:
+  max_loop: 10
+  circuit_breaker:
+    failure_threshold: 3
+    recovery_timeout: 30
+  textcli:
+    enabled: true
+    discover_cache_ttl: 300
+
+prompt_service:
+  url: "http://localhost:13156"
+  default_system_prompt: "你是一个有帮助的AI助手。"
+  append_system_prompt: "能用工具则必须用工具，无论任务如何简单。"
+
+document_service:
+  url: "http://localhost:8001"
+
+# v0_1_1 新增配置段
+auth:
+  enabled: false       # 是否开启用户ID校验
+  required: false      # 是否强制校验（仅 enabled=true 时生效）
+
+session_memory:
+  enabled: true        # 是否启用 <user-memory> 标签提取
+
+async_tasks:
+  enabled: false       # 服务级异步能力开关。v0_1_1 默认 false（骨架），v0.2 默认 true
+  max_per_user: 3      # 每个用户最多同时运行的异步任务数（仅 enabled=true 时生效）
+
+# ── packets API（v0_1_1 新增） ──
+packets:
+  enabled: true                     # 总开关
+  ttl_seconds: 1800                 # packet TTL（默认 30 分钟）
+  max_packet_size_mb: 5             # 单 packet 最大体积
+  max_packets_per_request: 20       # 单次 /chat/completions 最多引用的 packet 数
+  max_inline_data_per_request: 10   # 单次 inline_data 最大条数
+
+# _a P4.3: 相位产物数据面
+artifacts:
+  ttl_seconds: 86400        # 产物 TTL（默认 24h）
+
+# _a 3.6: 管道 API 管理面开关（默认关——对外主契约走 chat 多轮驱动）
+pipelines_api:
+  enabled: false
+
+logging:
+  level: "INFO"

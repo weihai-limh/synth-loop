@@ -1,0 +1,10 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Task Chain Monitor</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f0f2f5;color:#333;padding:24px}
+h1{font-size:20px;margin-bottom:16px}.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.step{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.step .num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-right:12px}
+.step .num.done{background:#e6fffb;color:#13c2c2}.step .num.active{background:#e6f7ff;color:#1890ff}.step .num.fail{background:#fff1f0;color:#f5222d}
+.empty{text-align:center;padding:40px;color:#999}</style></head><body><h1>Task Chain Monitor</h1>
+<div id="content"><div class="empty">No active task chains</div></div>
+<script>setInterval(()=>{fetch('/health').then(r=>r.json()).then(d=>{
+document.getElementById('content').innerHTML=d.active_chains?`<div class="card">Active task chains: ${d.active_chains}</div>`:'<div class="empty">No active task chains</div>'})},5000)</script></body></html>
