@@ -250,7 +250,7 @@ async def first_turn_prompt_selection(session: Session, user_query: str) -> None
 async def chat_completions(
     request: ChatCompletionRequest,
     authorization: Optional[str] = Header(None),
-    http_request: Optional[Request] = None,
+    http_request: Request = None,
 ) -> Any:
     """
     聊天补全接口（OpenAI 兼容） - Phase 3: Dispatch 决策链 + 上游过滤 + SSE 流式

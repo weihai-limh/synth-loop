@@ -1,4 +1,6 @@
-"""Phase 4 T1/T2/T3/T6: Pipeline 完整模型测试 (v0_1_2)"""
+"""Phase 4 T1/T2/T3/T6: Pipeline 完整模型测试 (v0_1_2/_a)"""
+
+import json
 
 import pytest
 from app.models.pipeline import (
@@ -196,10 +198,9 @@ class TestPlanCompiler:
 
     @pytest.mark.asyncio
     async def test_compile_3_phases(self, compiler, plan_config_3_phases):
-        """3 相位 → 产物 phases 数组长度 3"""
+        """_a 语义：3 相位 → steps 数组长度 3（无 ai;infer）"""
         result = await compiler.compile(plan_config_3_phases)
-        assert len(result["phases"]) == 3
-        assert result["_mode"] == "direct"
+        assert len(result["steps"]) == 3
         assert result["_schema"] == "text-cli-path-v1"
 
     @pytest.mark.asyncio
@@ -207,22 +208,41 @@ class TestPlanCompiler:
         """编辑模式 → _mode=edit"""
         result = await compiler.compile(plan_config_3_phases, mode="edit")
         assert result["_mode"] == "edit"
-        assert "_schema" not in result
-        assert len(result["phases"]) == 3
+        assert result["_schema"] == "text-cli-path-v1"
+        assert len(result["steps"]) == 3
 
     @pytest.mark.asyncio
     async def test_empty_plan(self, compiler):
-        """空 plan_config → phases 为空数组"""
+        """空 plan_config → steps 为空数组"""
         config = PlanConfig(phases=[])
         result = await compiler.compile(config)
-        assert result["phases"] == []
+        assert result["steps"] == []
 
     @pytest.mark.asyncio
-    async def test_gate_schema_in_output(self, compiler, plan_config_3_phases):
-        """闸门配置正确映射到输出"""
+    async def test_no_ai_infer(self, compiler, plan_config_3_phases):
+        """_a P9 修复：产物不含 ai;infer 指令"""
         result = await compiler.compile(plan_config_3_phases)
-        p1 = result["phases"][1]  # Phase 2: allow_path_edit=True
-        assert p1["gates"]["allow_path_edit"] is True
+        for step in result["steps"]:
+            assert "ai;infer" not in step["instruction"]
 
-        p2 = result["phases"][2]  # Phase 3: require_human_approval=True
-        assert p2["gates"]["require_human_approval"] is True
+    @pytest.mark.asyncio
+    async def test_assemble_alias_to_url(self, compiler):
+        """_a：assemble 组装——alias 解析为 default_source（运行时表）"""
+        from app.models.pipeline import PhaseDefinition
+        phase = PhaseDefinition(index=0, name="测试", description="测",
+                                endpoint_alias="home-service")
+
+        async def fake_resolver(alias):
+            return f"http://{alias}/text-cli/cli"
+
+        path = await compiler.assemble(
+            {"id": "p1", "name": "测试相位", "steps": [
+                {"id": "s1", "instruction": "tc-math;eval,{input.x}", "output_as": "r"}
+            ]},
+            phase,
+            alias_resolver=fake_resolver,
+        )
+        assert path["_schema"] == "text-cli-path-v1"
+        assert path["default_source"] == "http://home-service/text-cli/cli"
+        assert path["steps"][0]["source"] == "http://home-service/text-cli/cli"
+        assert "ai;infer" not in json.dumps(path)
