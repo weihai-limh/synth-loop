@@ -120,3 +120,71 @@ class TestPhaseChatProtocol:
             assert "未知 action" in resp["content"]
             return True
         assert asyncio.run(run())
+
+    def test_regenerate_flow(self, orchestrator):
+        """regenerate → 重新生成当前相位 path（P9 语义：不重开规划）"""
+        async def run():
+            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            sp1 = resp1["synth_pipeline"]
+            with respx.mock:
+                respx.post("http://mock-tc:28050/text-cli/cli").mock(
+                    return_value=httpx.Response(200, json={
+                        "rst_types": "text",
+                        "rst_data": {"status": "ok", "result": "regenerated"},
+                        "rst_err": ""}))
+                resp2 = await orchestrator.handle_chat(
+                    "换个思路", synth_pipeline={"id": sp1["id"], "action": "regenerate"})
+                sp2 = resp2["synth_pipeline"]
+                # 仍在相位流程中（awaiting_path_confirm / executing 等），pipeline id 不变
+                assert sp2["id"] == sp1["id"]
+                assert sp2["step"] in {"awaiting_path_confirm", "executing"}
+            return True
+        assert asyncio.run(run())
+
+    def test_check_result_long_task(self, orchestrator):
+        """R4 长任务：tc 返回 pending + task_id → check_result 决策点轮询"""
+        async def run():
+            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            sp1 = resp1["synth_pipeline"]
+            # 第一次 confirm：确认规划 → 生成 path → awaiting_path_confirm
+            resp2 = await orchestrator.handle_chat(
+                "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
+            sp2 = resp2["synth_pipeline"]
+            assert sp2["step"] == "awaiting_path_confirm"
+            # 第二次 confirm：确认 path → 执行 → tc 返回异步 pending（长任务）
+            with respx.mock:
+                respx.post("http://mock-tc:28050/text-cli/cli").mock(
+                    return_value=httpx.Response(200, json={
+                        "rst_types": "text",
+                        "rst_data": {"status": "pending", "task_id": "task-001"},
+                        "rst_err": ""}))
+                resp3 = await orchestrator.handle_chat(
+                    "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
+                sp3 = resp3["synth_pipeline"]
+                assert sp3["step"] == "executing"
+                assert "check_result" in resp3["content"]
+            # 轮询：check_result 决策点
+            resp4 = await orchestrator.handle_chat(
+                "查询结果", synth_pipeline={"id": sp1["id"], "action": "check_result"})
+            assert resp4["synth_pipeline"]["step"] == "executing"
+            return True
+        assert asyncio.run(run())
+
+    def test_tc_unreachable_phase_degraded(self, orchestrator):
+        """P18：相位执行 tc 不可达 → 降级响应（不崩、不挂起）"""
+        async def run():
+            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            sp1 = resp1["synth_pipeline"]
+            # 第一次 confirm：规划 → path
+            resp2 = await orchestrator.handle_chat(
+                "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
+            sp2 = resp2["synth_pipeline"]
+            assert sp2["step"] == "awaiting_path_confirm"
+            # 第二次 confirm：执行——tc 不 mock（连接失败）→ 相位降级
+            resp3 = await orchestrator.handle_chat(
+                "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
+            sp3 = resp3["synth_pipeline"]
+            assert sp3["step"] in {"aborted", "executing"}
+            assert resp3["content"]  # 有降级消息（不挂起）
+            return True
+        assert asyncio.run(run())
