@@ -21,7 +21,7 @@ class DiscoverCache:
         if key in self.cache:
             entry = self.cache[key]
             if time.time() - entry["time"] < self.ttl:
-                logger.info(f"DiscoverCache 命中: {key}")
+                logger.info(f"DiscoverCache cache hit: {key}")
                 return entry["value"]
             else:
                 del self.cache[key]
@@ -33,7 +33,7 @@ class DiscoverCache:
             "value": value,
             "time": time.time()
         }
-        logger.info(f"DiscoverCache 设置: {key}")
+        logger.info(f"DiscoverCache cache set: {key}")
 
 
 # 全局缓存实例
@@ -60,7 +60,7 @@ async def handle_discover_textcli(session, args: dict) -> dict:
         discover_cache.set(cache_key, result)
         return {"status": "success", "instructions": result}
     except Exception as e:
-        logger.error(f"handle_discover_textcli 失败: {e}")
+        logger.error(f"handle_discover_textcli failed: {e}")
         return {"status": "error", "message": str(e)}
 
 

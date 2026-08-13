@@ -148,8 +148,13 @@ def init_services() -> None:
         MANAGE_CONTEXT_DEFINITION,
     )
     
-    logger.info(f"已注册工具: {list(tool_dispatcher.registry.keys())}")
-    logger.info(f"工具定义数量: {len(tool_dispatcher.definitions)}")
+    # v0_1_2: FRACTAL_SYSTEM_PROMPT 配置化——从文件加载
+    global FRACTAL_SYSTEM_PROMPT
+    from ..config import load_fractal_prompt
+    FRACTAL_SYSTEM_PROMPT = load_fractal_prompt()
+    
+    logger.info(f"Registered tools: {list(tool_dispatcher.registry.keys())}")
+    logger.info(f"Tool definition count: {len(tool_dispatcher.definitions)}")
 
 
 def _inject_dynamic_tools(tools: list[dict[str, Any]]) -> None:
@@ -171,7 +176,7 @@ def _inject_dynamic_tools(tools: list[dict[str, Any]]) -> None:
         # 适配工具格式
         adapted = adapter.adapt(tool)
         if not adapted:
-            logger.warning(f"无法适配工具: {name}")
+            logger.warning(f"Unable to adapt tool: {name}")
             continue
         
         # 提取元数据
@@ -179,7 +184,7 @@ def _inject_dynamic_tools(tools: list[dict[str, Any]]) -> None:
         
         # 注册到工具调度器
         tool_dispatcher.register_dynamic_tool(name, meta, adapted)
-        logger.info(f"注入动态工具: {name} (类型: {meta.get('subtype')})")
+        logger.info(f"Injected dynamic tool: {name} (type: {meta.get('subtype')})")
 
 
 async def first_turn_prompt_selection(session: Session, user_query: str) -> None:
@@ -201,7 +206,7 @@ async def first_turn_prompt_selection(session: Session, user_query: str) -> None
     # 合并追加的系统提示
     if append_system_prompt:
         prompt_text = f"{prompt_text}\n\n{append_system_prompt}"
-        logger.info(f"追加系统提示: {append_system_prompt}")
+        logger.info(f"Appended system prompt: {append_system_prompt}")
     
     # 获取工具和资源
     tools = result.get("tools", [])
@@ -220,7 +225,7 @@ async def first_turn_prompt_selection(session: Session, user_query: str) -> None
         if independent_assets:
             assets_context = asset_consumer.format_assets_for_context(independent_assets)
             prompt_text = f"{prompt_text}\n\n{assets_context}"
-            logger.info(f"注入 {len(independent_assets)} 个独立资源到上下文")
+            logger.info(f"Injected {len(independent_assets)} independent assets into context")
     elif tools:
         # 只有工具，没有资源
         _inject_dynamic_tools(tools)
@@ -229,16 +234,16 @@ async def first_turn_prompt_selection(session: Session, user_query: str) -> None
         asset_consumer = get_asset_consumer()
         assets_context = asset_consumer.format_assets_for_context(assets)
         prompt_text = f"{prompt_text}\n\n{assets_context}"
-        logger.info(f"注入 {len(assets)} 个资源到上下文")
+        logger.info(f"Injected {len(assets)} assets into context")
     
     # 记录降级状态
     if degradation_level == DegradationLevel.DEGRADED:
-        logger.warning(f"使用降级模式: {result.get('degradation_reason', '未知原因')}")
+        logger.warning(f"Using degraded mode: {result.get('degradation_reason', 'unknown reason')}")
     elif degradation_level == DegradationLevel.FAILURE:
-        logger.error(f"使用故障模式: {result.get('degradation_reason', '系统故障')}")
+        logger.error(f"Using failure mode: {result.get('degradation_reason', 'system failure')}")
     
     session.permanent_system_prompt = prompt_text
-    logger.info(f"使用 strata-match 策略 (级别: {degradation_level}): {prompt_text[:100]}...")
+    logger.info(f"Using strata-match strategy (level: {degradation_level}): {prompt_text[:100]}...")
 
 
 @router.post("/v1/chat/completions")
@@ -368,7 +373,7 @@ async def _handle_prompt_chat_level(request, session, user_text, complexity, log
                 temperature=request.temperature, max_tokens=request.max_tokens,
             )
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"下游 LLM 服务不可用: {str(e)}")
+            raise HTTPException(status_code=502, detail=f"Downstream LLM service unavailable: {str(e)}")
 
         choice = response.get("choices", [{}])[0]
         finish_reason = choice.get("finish_reason", "")
@@ -395,7 +400,7 @@ async def _handle_prompt_chat_level(request, session, user_text, complexity, log
         await session_manager.save_snapshot(session)
 
     if final_response is None:
-        raise HTTPException(status_code=500, detail="处理请求时发生未知错误")
+        raise HTTPException(status_code=500, detail="Unknown error occurred while processing the request")
     return JSONResponse(content=final_response)
 
 
@@ -425,13 +430,13 @@ async def _handle_task_chain_placeholder(request, session, user_text, logic_cate
     # 构建响应
     summary = chain_result.get("summary", "")
     steps_text = "\n".join(
-        f"{'✅' if s['status']=='completed' else '❌'} 步骤{s['step_num']}: {s['step_name']}"
+        f"{'✅' if s['status']=='completed' else '❌'} Step {s['step_num']}: {s['step_name']}"
         for s in chain_result.get("steps", [])
     )
     if chain_result.get("failed"):
-        summary += f"\n\n⚠ 任务链在步骤{chain_result['failed_at_step']}失败。"
+        summary += f"\n\n⚠ Task chain failed at step {chain_result['failed_at_step']}."
         if chain_result.get("pending_steps"):
-            summary += f"\n未执行步骤: {', '.join(chain_result['pending_steps'])}"
+            summary += f"\nPending steps: {', '.join(chain_result['pending_steps'])}"
 
     response = {
         "id": f"chain-{chain_result['chain_id']}",
@@ -606,7 +611,7 @@ async def _handle_message_pre_check(user_text: str, session: Session) -> JSONRes
             else:
                 content = f"Task status: {status}"
         else:
-            content = "任务不存在 / Task not found."
+            content = "Task not found."
         return JSONResponse(content={
             "id": f"task-query-{full_id}",
             "object": "chat.completion",
@@ -625,22 +630,10 @@ async def _handle_message_pre_check(user_text: str, session: Session) -> JSONRes
 
 LANGUAGE_KEEP_PROMPT = "Always use the same language as the user's latest message unless user explicitly asks."
 
-# ====== v0_1_1 Phase 4: 6 级分形 Prompt ======
-
-FRACTAL_SYSTEM_PROMPT = (LANGUAGE_KEEP_PROMPT + """
-
-You are a request classifier. Respond with EXACTLY ONE letter:""") + """
-
-a - Simple greeting, weather, chit-chat. Direct answer, no enhancement.
-b - Professional task (writing, coding, analysis). Needs prompt enhancement.
-c - Single external tool or agent call.
-d - Single synchronous task. Quick to complete, immediate response.
-e - Multi-step task chain. Plan → execute → verify → summarize.
-f - Synchronous task chain. All steps complete quickly.
-
-User message: \"\"\"{user_message}\"\"\"
-
-Respond with ONLY the letter, nothing else."""
+# ====== v0_1_2: 6 级分形 Prompt 配置化 ======
+# FRACTAL_SYSTEM_PROMPT 从 config/fractal_prompt.txt 加载
+# 此变量由 init_services() 在启动时赋值
+FRACTAL_SYSTEM_PROMPT = ""
 
 
 def _classify_by_fractal(response_text: str) -> str:
@@ -674,22 +667,47 @@ FRACTAL_ROUTE_MAP = {
 ASYNC_LEVELS = {"d", "e"}
 
 
-async def _create_async_task(user_text: str, session: Session, level: str) -> JSONResponse:
-    """创建异步任务记录 → 返回固定模板"""
+async def _delegate_to_textcli(user_text: str, session, level: str, plan_step: dict = None) -> JSONResponse:
+    """v0_1_2: 委托 text-cli --async 执行，不再空转"""
+    from ..config import get_config
+    from ..database import get_shared_db
+
+    cfg = get_config()
+    textcli_cfg = cfg.get("tools", {}).get("textcli", {})
+    textcli_url = textcli_cfg.get("default_endpoint", "http://localhost:28050/text-cli/cli")
+
+    # 调 text-cli --async 获取 task_id
+    text_cli_task_id = None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                textcli_url,
+                json={"prompt": f"AI:--async {user_text}", "plan_step": plan_step},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text_cli_task_id = data.get("task_id", data.get("id"))
+    except Exception as e:
+        logger.warning(f"_delegate_to_textcli failed for text-cli: {e}")
+        text_cli_task_id = None
+
+    # synth-loop tasks 表降为管道级日志
     task_id = f"Task-{uuid4().hex[:8]}-synthloop"
-    from ..database import get_db_path
-    import aiosqlite
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    try:
+        db = await get_shared_db()
         await db.execute(
-            """INSERT INTO tasks (id, session_id, user_id, input, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-            (task_id, session.session_id, getattr(session, 'user_id', None), user_text),
+            """INSERT INTO tasks (id, session_id, user_id, input, status, result, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'queued', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            (task_id, session.session_id, getattr(session, 'user_id', None), user_text,
+             json.dumps({"text_cli_task_id": text_cli_task_id}) if text_cli_task_id else None),
         )
         await db.commit()
-    logger.info(f"Async task created: {task_id}, level={level}")
-    template = "The asynchronous task opening code is as follows(异步任务开启编码如下): {task_id}。"
-    content = template.format(task_id=task_id)
+    except Exception as e:
+        logger.warning(f"Failed to log pipeline task: {e}")
+
+    logger.info(f"Async delegated to text-cli: synth_task={task_id}, text_cli_task={text_cli_task_id}, level={level}")
+    template = "The asynchronous task opening code is as follows: {task_id}."
+    content = template.format(task_id=text_cli_task_id or task_id)
     return JSONResponse(content={
         "id": f"async-{task_id}",
         "object": "chat.completion",
@@ -697,14 +715,27 @@ async def _create_async_task(user_text: str, session: Session, level: str) -> JS
         "model": f"fractal-{level}",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "_text_cli_task_id": text_cli_task_id,
     })
 
 
-def _check_concurrency_limit(user_id: str) -> bool:
-    """检查用户并发是否超限（同步检查，异步创建时调用）"""
-    # Phase 4 骨架：固定模板创建时先不做真实的并发计数
-    # Phase 4.4 超限模板在 async dispatch 中直接返回
-    return True  # 骨架阶段默认允许
+async def _check_concurrency_limit(user_id: str) -> bool:
+    """v0_1_2: 检查用户并发是否超限（真实计数）"""
+    from ..config import get_async_task_settings
+    from ..database import get_shared_db
+    settings = get_async_task_settings()
+    max_per_user = settings.max_per_user
+    try:
+        db = await get_shared_db()
+        cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM tasks WHERE user_id = ? AND status IN ('queued', 'running')",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        count = row[0] if row else 0
+        return count < max_per_user
+    except Exception:
+        return True  # DB 不可用时降级放行
 
 
 async def _handle_fractal_dispatch(request, session, user_text, logic_category,
@@ -733,18 +764,18 @@ async def _handle_fractal_dispatch(request, session, user_text, logic_category,
         if level in ASYNC_LEVELS and async_settings.enabled:
             # 并发上限检查
             user_id = getattr(session, 'user_id', None)
-            if not _check_concurrency_limit(user_id):
+            if not await _check_concurrency_limit(user_id):
                 return JSONResponse(content={
                     "id": f"limit-{uuid4().hex[:8]}",
                     "object": "chat.completion",
                     "created": int(time.time()),
                     "model": "pre-check",
                     "choices": [{"index": 0, "message": {"role": "assistant",
-                        "content": "There are currently {max} asynchronous tasks in progress(当前已有{max}个异步任务正在进行中). Please try again after one of them is completed(请等待其中一个完成后重试).".format(max=async_settings.max_per_user)},
+                        "content": "There are currently {max} asynchronous tasks in progress. Please try again after one of them is completed.".format(max=async_settings.max_per_user)},
                         "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 })
-            return await _create_async_task(user_text, session, level)
+            return await _delegate_to_textcli(user_text, session, level)
 
         # 同步路由
         route = FRACTAL_ROUTE_MAP.get(level, "strata_match")

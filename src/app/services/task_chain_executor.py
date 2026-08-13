@@ -1,5 +1,5 @@
 """
-TaskChainExecutor - v0_1_1: 任务链执行 + 中断检查
+TaskChainExecutor - v0_1_2: 任务链执行 + 中断检查 + 可靠性修复
 链式循环：选模型→strata-match→工具循环→verify→下一步
 集成 strata-match sg- Job 交互 + 失败处理。
 """
@@ -9,6 +9,8 @@ import logging
 import time
 from typing import Any, Optional
 from uuid import uuid4
+
+import aiosqlite
 
 from .internal_reasoner import InternalReasoner
 from .context_injector import ContextInjector
@@ -23,6 +25,14 @@ class TaskCancelledError(Exception):
         super().__init__(f"Task chain cancelled: {chain_id}")
 
 
+class StepExecutionError(Exception):
+    """v0_1_2: 步骤执行异常——不再被吞"""
+    def __init__(self, step_name: str, original_error: Exception):
+        self.step_name = step_name
+        self.original_error = original_error
+        super().__init__(f"Step '{step_name}' failed: {original_error}")
+
+
 class TaskChainExecutor:
     """任务链执行器"""
 
@@ -31,23 +41,20 @@ class TaskChainExecutor:
         self.injector = ContextInjector()
 
     async def _check_cancelled(self, session) -> None:
-        """v0_1_1: 中断检查——通过 DB tasks 表查询关联任务是否已取消"""
+        """v0_1_2: 中断检查——使用全局共享 DB 连接"""
         chain_id = getattr(session, 'active_chain_id', None)
         if not chain_id:
             return
         try:
-            import aiosqlite
-            from ..database import get_db_path
-            db_path = get_db_path()
-            async with aiosqlite.connect(db_path) as db:
-                db.row_factory = aiosqlite.Row
-                cursor = await db.execute(
-                    "SELECT status FROM tasks WHERE session_id = ? AND status = 'cancelled' LIMIT 1",
-                    (session.session_id,),
-                )
-                row = await cursor.fetchone()
-                if row:
-                    raise TaskCancelledError(chain_id)
+            from ..database import get_shared_db
+            db = await get_shared_db()
+            cursor = await db.execute(
+                "SELECT status FROM tasks WHERE session_id = ? AND status = 'cancelled' LIMIT 1",
+                (session.session_id,),
+            )
+            row = await cursor.fetchone()
+            if row:
+                raise TaskCancelledError(chain_id)
         except TaskCancelledError:
             raise
         except Exception:
@@ -115,19 +122,24 @@ class TaskChainExecutor:
                     logger.error(f"strata-match query failed at step {step_num}: {e}")
                     sp_result = {"primary_prompt": "", "matched_skills_tags": []}
 
-                # 执行工具循环
+                # 执行工具循环 (v0_1_2: 捕获 StepExecutionError 标记失败)
                 full_prompt = sp_result.get("primary_prompt", session.permanent_system_prompt)
-                step_result_text = await self._execute_step(
-                    ctx, step_name, full_prompt, downstream_llm, context_router,
-                    tool_dispatcher, session, model, api_key, endpoint_name, max_tokens
-                )
+                try:
+                    step_result_text = await self._execute_step(
+                        ctx, step_name, full_prompt, downstream_llm, context_router,
+                        tool_dispatcher, session, model, api_key, endpoint_name, max_tokens
+                    )
+                except StepExecutionError as e:
+                    logger.error(f"Step execution failed at step {step_num} '{step_name}': {e.original_error}")
+                    step_result_text = f"StepExecutionError: {e.original_error}"
 
-                # 3. 验证
-                verification = {"passed": True, "feedback": ""}
+                # 3. 验证 (v0_1_2: 默认 passed=False，异常不再被吞)
+                verification = {"passed": False, "feedback": "verification_unavailable"}
                 try:
                     verification = await self.reasoner.verify(step_result_text, step_name, downstream_llm, model=model, api_key=api_key)
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Verification error at step {step_name}: {e}")
+                    verification = {"passed": False, "feedback": f"verification_error: {str(e)}"}
 
                 step_record = {
                     "step_num": step_num,
@@ -196,5 +208,5 @@ class TaskChainExecutor:
             content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
             return content or f"完成{step_name}"
         except Exception as e:
-            logger.error(f"Step execution failed: {e}")
-            return f"执行失败: {str(e)}"
+            logger.error(f"Step execution failed: {step_name}, {e}")
+            raise StepExecutionError(step_name=step_name, original_error=e)

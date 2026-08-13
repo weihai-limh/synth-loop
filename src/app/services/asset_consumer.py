@@ -67,11 +67,11 @@ class AssetConsumer:
         ]
         
         logger.info(
-            f"资源消费分析完成: "
-            f"工具 {len(tools)} 个, "
-            f"资源 {len(assets)} 个, "
-            f"匹配 {len(matched_asset_ids)} 个, "
-            f"独立 {len(independent_assets)} 个"
+            f"Resource consumption analysis complete: "
+            f"tools: {len(tools)}, "
+            f"assets: {len(assets)}, "
+            f"matched: {len(matched_asset_ids)}, "
+            f"independent: {len(independent_assets)}"
         )
         
         return processed_tools, independent_assets
@@ -103,7 +103,7 @@ class AssetConsumer:
                 # 2. 资源描述包含参数名关键词
                 if self._is_match(param_lower, asset_subtype, asset_desc):
                     matched.append(asset)
-                    logger.debug(f"资源 {asset.get('name')} 匹配工具 {tool_name} 参数 {param}")
+                    logger.debug(f"asset {asset.get('name')} matched tool {tool_name} param {param}")
                     break
         
         return matched

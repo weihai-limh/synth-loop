@@ -41,7 +41,7 @@ class Analysis:
     def report(self, events: list[dict]) -> dict:
         """生成分析报告"""
         if not events:
-            return {"message": "无事件数据"}
+            return {"message": "No event data"}
 
         types = Counter(e.get("type", "unknown") for e in events)
         sessions = Counter(e.get("session_id", "unknown") for e in events if e.get("session_id"))

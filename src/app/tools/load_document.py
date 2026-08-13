@@ -69,7 +69,7 @@ async def handle_load_document(
         content = data.get("content", "")
 
         if not doc_id or not content:
-            return {"status": "error", "message": "文档服务返回数据不完整"}
+            return {"status": "error", "message": "Document service returned incomplete data"}
 
         # 检查是否已加载
         for doc in session.loaded_docs:
@@ -83,6 +83,6 @@ async def handle_load_document(
         return {"status": "loaded", "doc_id": doc_id}
 
     except httpx.HTTPStatusError as e:
-        return {"status": "error", "message": f"文档服务请求失败: {e.response.status_code}"}
+        return {"status": "error", "message": f"Document service request failed: {e.response.status_code}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}

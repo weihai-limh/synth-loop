@@ -12,7 +12,7 @@ class MockDownstreamLLM:
     """Mock 下游 LLM 服务"""
     
     def __init__(self):
-        logger.info("MockDownstreamLLM 初始化")
+        logger.info("MockDownstreamLLM initialized")
     
     async def chat(
         self,
@@ -191,12 +191,12 @@ class MockDownstreamLLM:
         user_message_lower = user_message.lower()
         
         if "你好" in user_message_lower or "hello" in user_message_lower:
-            return "你好！我是 Mock LLM 助手，很高兴为你服务。"
+            return "Hello! I am the Mock LLM assistant, happy to help you."
         
         if "帮助" in user_message_lower or "help" in user_message_lower:
-            return "我可以帮助你进行各种任务，包括数学计算、编程、写作等。请告诉我你需要什么帮助。"
+            return "I can help you with various tasks, including math, coding, writing, and more. Please tell me what you need help with."
         
-        return f"这是 Mock LLM 的响应。你刚才说的是：{user_message}"
+        return f"This is a Mock LLM response. You just said: {user_message}"
 
 
 # 全局实例

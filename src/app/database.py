@@ -1,6 +1,7 @@
 """数据库连接与初始化模块"""
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,29 @@ from .config import get_section, SRC_DIR
 
 # 全局数据库连接
 _db_path: str | None = None
+# v0_1_2: 全局共享连接（lifespan 初始化，避免每次建连）
+_db_connection: aiosqlite.Connection | None = None
+
+
+async def get_shared_db() -> aiosqlite.Connection:
+    """v0_1_2: 获取全局共享数据库连接"""
+    global _db_connection
+    if _db_connection is None:
+        db_path = get_db_path()
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        _db_connection = await aiosqlite.connect(db_path)
+        _db_connection.row_factory = aiosqlite.Row
+        logger = logging.getLogger(__name__)
+        logger.info(f"Shared DB connection opened: {db_path}")
+    return _db_connection
+
+
+async def close_shared_db() -> None:
+    """v0_1_2: 关闭全局共享数据库连接"""
+    global _db_connection
+    if _db_connection is not None:
+        await _db_connection.close()
+        _db_connection = None
 
 
 def get_db_path() -> str:

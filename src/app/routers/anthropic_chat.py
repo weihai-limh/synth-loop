@@ -153,7 +153,7 @@ async def messages(
     
     接收 Anthropic 格式的请求，转换为内部格式处理后返回 Anthropic 格式的响应。
     """
-    logger.info(f"收到 Anthropic 格式请求: model={request.model}, stream={request.stream}")
+    logger.info(f"Received Anthropic-format request: model={request.model}, stream={request.stream}")
     
     try:
         # 1. 转换请求格式
@@ -211,12 +211,12 @@ async def messages(
         response_translator = get_response_translator()
         anthropic_response = response_translator.openai_to_anthropic(openai_response)
         
-        logger.info(f"Anthropic 响应: stop_reason={anthropic_response.get('stop_reason')}")
+        logger.info(f"Anthropic response: stop_reason={anthropic_response.get('stop_reason')}")
         
         return anthropic_response
         
     except Exception as e:
-        logger.error(f"Anthropic 请求处理失败: {e}")
+        logger.error(f"Anthropic request processing failed: {e}")
         raise HTTPException(
             status_code=500,
             detail={

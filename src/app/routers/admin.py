@@ -25,7 +25,7 @@ PUBLIC_DIR = SRC_DIR / "public"
 
 # ========== 监听 API ==========
 
-@router.post("/admin/listeners", summary="创建监听 Job")
+@router.post("/admin/listeners", summary="Create listener Job")
 async def create_listener(payload: dict):
     """创建监听 Job"""
     from uuid import uuid4
@@ -36,7 +36,7 @@ async def create_listener(payload: dict):
     return {"id": job.id, "job_type": job.job_type, "status": job.status}
 
 
-@router.get("/admin/listeners", summary="查询监听 Job")
+@router.get("/admin/listeners", summary="Query listener Jobs")
 async def list_listeners(session_id: str = Query(None)):
     """查询监听 Job 列表"""
     store = get_job_store()
@@ -47,7 +47,7 @@ async def list_listeners(session_id: str = Query(None)):
     return [{"id": j.id, "status": j.status, "session_id": j.session_id} for j in jobs]
 
 
-@router.delete("/admin/listeners/{listener_id}", summary="删除监听 Job")
+@router.delete("/admin/listeners/{listener_id}", summary="Delete listener Job")
 async def delete_listener(listener_id: str):
     store = get_job_store()
     success = await store.delete(listener_id)
@@ -58,12 +58,12 @@ async def delete_listener(listener_id: str):
 
 # ========== 管理面板 ==========
 
-@router.get("/admin", response_class=HTMLResponse, summary="管理面板首页")
+@router.get("/admin", response_class=HTMLResponse, summary="Admin dashboard home")
 async def admin_hub():
     """v0_1_1: 统一管理导航"""
     return HTMLResponse(content="""<!DOCTYPE html>
 <html lang="zh">
-<head><meta charset="UTF-8"><title>synth-loop 管理面板</title>
+<head><meta charset="UTF-8"><title>synth-loop Admin Panel</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:700px;margin:60px auto;padding:0 20px;background:#0d1117;color:#c9d1d9}
 h1{color:#58a6ff;text-align:center;margin-bottom:40px}
@@ -75,41 +75,41 @@ h1{color:#58a6ff;text-align:center;margin-bottom:40px}
 .note{text-align:center;margin-top:40px;color:#484f58;font-size:12px}
 </style></head>
 <body>
-<h1>synth-loop 管理面板</h1>
+<h1>synth-loop Admin Panel</h1>
 <div class="cards">
-<a class="card" href="/admin/users/panel"><h3>用户管理</h3><p>创建/启用/禁用/删除用户</p></a>
-<a class="card" href="/admin/sessions"><h3>会话管理</h3><p>查看活跃会话列表</p></a>
-<a class="card" href="/admin/tasks"><h3>任务管理</h3><p>查看/取消异步任务</p></a>
-<a class="card" href="/admin/jobs"><h3>Job 管理</h3><p>查看/管理监 Job</p></a>
-<a class="card" href="/admin/analysis"><h3>分析报告</h3><p>事件分析报告</p></a>
-<a class="card" href="/docs"><h3>API 文档</h3><p>Swagger UI</p></a>
+<a class="card" href="/admin/users/panel"><h3>User Management</h3><p>Create / enable / disable / delete users</p></a>
+<a class="card" href="/admin/sessions"><h3>Session Management</h3><p>View active session list</p></a>
+<a class="card" href="/admin/tasks"><h3>Task Management</h3><p>View / cancel async tasks</p></a>
+<a class="card" href="/admin/jobs"><h3>Job Management</h3><p>View / manage listeners</p></a>
+<a class="card" href="/admin/analysis"><h3>Analysis Report</h3><p>Event analysis report</p></a>
+<a class="card" href="/docs"><h3>API Docs</h3><p>Swagger UI</p></a>
 </div>
 <p class="note">synth-loop v0_1_1</p>
 </body></html>""")
 
 
-@router.get("/admin/sessions", response_class=HTMLResponse, summary="会话管理面板")
+@router.get("/admin/sessions", response_class=HTMLResponse, summary="Session management panel")
 async def sessions_panel():
     path = PUBLIC_DIR / "sessions.html"
     if path.exists():
         return HTMLResponse(content=path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Gateway Sessions</h1><p>面板加载中...</p>")
+    return HTMLResponse(content="<h1>Gateway Sessions</h1><p>Loading...</p>")
 
 
-@router.get("/admin/tasks", response_class=HTMLResponse, summary="任务链管理面板")
+@router.get("/admin/tasks", response_class=HTMLResponse, summary="Task chain management panel")
 async def tasks_panel():
     path = PUBLIC_DIR / "tasks.html"
     if path.exists():
         return HTMLResponse(content=path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Task Chain Monitor</h1><p>面板加载中...</p>")
+    return HTMLResponse(content="<h1>Task Chain Monitor</h1><p>Loading...</p>")
 
 
-@router.get("/admin/jobs", response_class=HTMLResponse, summary="Job 管理面板")
+@router.get("/admin/jobs", response_class=HTMLResponse, summary="Job management panel")
 async def jobs_panel():
     path = PUBLIC_DIR / "jobs.html"
     if path.exists():
         return HTMLResponse(content=path.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Job Manager</h1><p>面板加载中...</p>")
+    return HTMLResponse(content="<h1>Job Manager</h1><p>Loading...</p>")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -143,7 +143,7 @@ async def _register_to_strata_match(sl_user_id: str) -> bool:
         return False
 
 
-@router.get("/admin/users", summary="用户列表")
+@router.get("/admin/users", summary="User list")
 async def users_list() -> list[dict[str, Any]]:
     """列出所有用户"""
     users = await list_users()
@@ -151,7 +151,7 @@ async def users_list() -> list[dict[str, Any]]:
              "created_at": u.get("created_at"), "updated_at": u.get("updated_at")} for u in users]
 
 
-@router.post("/admin/users", summary="创建用户")
+@router.post("/admin/users", summary="Create user")
 async def users_create(payload: dict[str, Any]):
     """创建用户（sl-{uuid}），联动注册到 strata-match"""
     user_id = payload.get("id", "")
@@ -176,7 +176,7 @@ async def users_create(payload: dict[str, Any]):
     }
 
 
-@router.put("/admin/users/{user_id}/disable", summary="禁用用户")
+@router.put("/admin/users/{user_id}/disable", summary="Disable user")
 async def users_disable(user_id: str):
     """禁用用户"""
     user = await get_user(user_id)
@@ -186,7 +186,7 @@ async def users_disable(user_id: str):
     return {"id": user_id, "enabled": False}
 
 
-@router.put("/admin/users/{user_id}/enable", summary="启用用户")
+@router.put("/admin/users/{user_id}/enable", summary="Enable user")
 async def users_enable(user_id: str):
     """启用用户"""
     user = await get_user(user_id)
@@ -196,7 +196,7 @@ async def users_enable(user_id: str):
     return {"id": user_id, "enabled": True}
 
 
-@router.delete("/admin/users/{user_id}", summary="删除用户")
+@router.delete("/admin/users/{user_id}", summary="Delete user")
 async def users_delete(user_id: str):
     """删除用户"""
     success = await delete_user(user_id)
@@ -205,7 +205,7 @@ async def users_delete(user_id: str):
     return {"status": "deleted", "id": user_id}
 
 
-@router.get("/admin/users/panel", response_class=HTMLResponse, summary="用户管理面板")
+@router.get("/admin/users/panel", response_class=HTMLResponse, summary="User management panel")
 async def users_panel():
     """用户管理 HTML 页面"""
     path = PUBLIC_DIR / "users.html"
@@ -213,7 +213,7 @@ async def users_panel():
         return HTMLResponse(content=path.read_text(encoding="utf-8"))
     return HTMLResponse(content="""<!DOCTYPE html>
 <html lang="zh">
-<head><meta charset="UTF-8"><title>synth-loop — 用户管理</title>
+<head><meta charset="UTF-8"><title>synth-loop — User Management</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;background:#0d1117;color:#c9d1d9}
 h1{color:#58a6ff}
@@ -231,34 +231,34 @@ input:focus{outline:none;border-color:#58a6ff}
 .status.disabled{background:#da363322;color:#f85149}
 </style></head>
 <body>
-<h1>用户管理</h1>
+<h1>User Management</h1>
 <div>
   <input id="newUserId" placeholder="sl-{uuid}" style="width:250px">
-  <input id="newUserName" placeholder="显示名称" style="width:200px">
-  <button onclick="createUser()">创建用户</button>
+  <input id="newUserName" placeholder="Display name" style="width:200px">
+  <button onclick="createUser()">Create User</button>
 </div>
-<table><thead><tr><th>ID</th><th>显示名</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+<table><thead><tr><th>ID</th><th>Display Name</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
 <tbody id="userTableBody"></tbody></table>
 <script>
 const BASE = '/admin/users';
 async function loadUsers(){const r=await fetch(BASE);const d=await r.json();let h='';d.forEach(u=>{h+=`<tr>
 <td>${u.id}</td><td>${u.display_name||'-'}</td>
-<td><span class="status ${u.enabled?'active':'disabled'}">${u.enabled?'启用':'禁用'}</span></td>
+<td><span class="status ${u.enabled?'active':'disabled'}">${u.enabled?'Enabled':'Disabled'}</span></td>
 <td>${u.created_at||'-'}</td>
-<td>${u.enabled?`<button class="warn" onclick="toggleUser('${u.id}',false)">禁用</button>`:`<button onclick="toggleUser('${u.id}',true)">启用</button>`}
-<button class="danger" onclick="delUser('${u.id}')">删除</button></td></tr>`});document.getElementById('userTableBody').innerHTML=h}
+<td>${u.enabled?`<button class="warn" onclick="toggleUser('${u.id}',false)">Disable</button>`:`<button onclick="toggleUser('${u.id}',true)">Enable</button>`}
+<button class="danger" onclick="delUser('${u.id}')">Delete</button></td></tr>`});document.getElementById('userTableBody').innerHTML=h}
 async function createUser(){const id=document.getElementById('newUserId').value;const dn=document.getElementById('newUserName').value;
-if(!id.startsWith('sl-')){alert('ID 需以 sl- 开头');return}
+if(!id.startsWith('sl-')){alert('ID must start with sl-');return}
 await fetch(BASE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,display_name:dn})});loadUsers()}
 async function toggleUser(id,enable){await fetch(`${BASE}/${id}/${enable?'enable':'disable'}`,{method:'PUT'});loadUsers()}
-async function delUser(id){if(!confirm(`删除用户 ${id}?`))return;await fetch(`${BASE}/${id}`,{method:'DELETE'});loadUsers()}
+async function delUser(id){if(!confirm(`Delete user ${id}?`))return;await fetch(`${BASE}/${id}`,{method:'DELETE'});loadUsers()}
 loadUsers()
 </script></body></html>""")
 
 
 # ========== 分析 API ==========
 
-@router.get("/admin/analysis", summary="事件分析报告")
+@router.get("/admin/analysis", summary="Event analysis report")
 async def analysis_report(session_id: str = Query(None)):
     """生成分析报告"""
     config = get_section("monitoring")
