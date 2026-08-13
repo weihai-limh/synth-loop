@@ -1,11 +1,11 @@
 # synth-loop 产品文档
 
 > **文档类型**：产品设计
-> **版本**：v0.1.2 | **日期**：2026-07-23
+> **版本**：v0.1.2_a | **日期**：2026-08-14
 > **适用范围**：synth-loop
 > **关联文档**：`design_zh.md`、`api_zh.md`
 >
-> synth-loop 是一个 LLM 编排引擎。对外暴露 OpenAI/Anthropic 兼容端点，内部对每次请求做分类、路由、策略注入、任务拆解。v0.1.2 新增多相位管道编排——PipelineSession 管理从想法到落地的全部状态。
+> synth-loop 是一个 LLM 编排引擎。对外暴露 OpenAI/Anthropic 兼容端点，内部对每次请求做分类、路由、策略注入、任务拆解。v0.1.2 新增多相位管道编排——PipelineSession 管理从想法到落地的全部状态；v0.1.2_a 将相位对外契约重铸为 **chat 多轮**（`synth_pipeline` 字段驱动），并收敛 tc 消费链路（运行时表 + 强化客户端）。
 
 ---
 
@@ -37,11 +37,13 @@ synth-loop 是一个编排引擎。它不对请求做透传转发——它在每
 | 组件 | 代码 | 职责 |
 |------|------|------|
 | 复杂度分类 | `complexity_classifier.py` | 规则 + LLM 双层判定 |
-| 执行路由 | `execution_router.py` | 分形决策 + 模型选择 |
+| 执行路由 | `execution_router.py` | 分形决策 + 模型选择（v0.1.2_a：6 场景 + 模型级降级） |
 | 任务链执行器 | `task_chain_executor.py` | plan → execute → verify → summarize |
 | 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
 | 协议翻译 | `protocol_translator.py` | Anthropic ↔ OpenAI 格式互转 |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
+| 运行时表 + 强化客户端（v0.1.2_a） | `runtime_endpoints.py` + `textcli_enhanced_client.py` | tc 消费收敛：alias 路由 / rank 降级 / 信封直读 |
+| 相位编排器（v0.1.2_a） | `phase_chat_orchestrator.py` | chat 多轮驱动相位：synth_pipeline 状态机 + 决策点 |
 
 ---
 
@@ -98,6 +100,10 @@ curl http://localhost:13155/v1/chat/completions \
 |------|--------|
 | **按复杂度自动分流** | 简单问题不消耗策略匹配，走规则匹配直答通道 |
 | **多相位管道编排（v0.1.2）** | 复杂任务拆为相位序列自动推进——三闸控制审查深度，异步委托长任务 |
+| **相位 chat 契约（v0.1.2_a）** | 相位 = chat 多轮：`synth_pipeline` 字段回传驱动（confirm/regenerate/abort/check_result），无需 9 端点 API——普通请求永不自动进相位（保守阈值） |
+| **tc 消费收敛（v0.1.2_a）** | 三套自建 tc 调用收敛为运行时表 + 强化客户端：alias 精确路由、同 alias rank 降级、鉴权失败不降级、长任务 check_result 轮询 |
+| **LLM 层升级（v0.1.2_a）** | 6 场景路由（planning 强模型/summarize 便宜模型）+ 模型级降级（503 切同池/502 切端点） |
+| **统一 token（v0.1.2_a）** | 权限（token）+ 身份（user-id）双轨，先验权再归身份；运行时表管理 API admin scope |
 | **装 100 个工具 token 不涨** | 不注册上千个工具，只注册少量内置工具 + 2 个元工具 + 按需注入动态工具 |
 | **不用手写 Prompt** | 策略层自动匹配专家人设 + skills 技能分片 |
 | **复杂任务一键完成** | "先分析再报告"——只需一个请求，系统自动拆解为任务链逐步执行 |
@@ -156,6 +162,7 @@ curl http://localhost:13155/v1/chat/completions \
 | **增强模式** | 请求 → synth-loop → 策略注入 → 下游 LLM | 生产使用，需专家 Prompt + 技能分片 |
 | **完整模式** | 请求 → synth-loop → 策略注入 + 工具调度 → 下游 LLM | 复杂任务链，需跨服务工具调用 |
 | **管道模式（v0.1.2）** | 创建 PipelineSession → 计划编译 → 逐相位推进 → 三闸审查 → 异步委托 text-cli | 多步骤创作/开发/设计流程，需人工审查节点 |
+| **相位 chat 模式（v0.1.2_a）** | 普通 chat 请求携带 `synth_pipeline` 字段 → 相位多轮推进（规划→过闸→执行→check_result）；显式触发，不劫持普通请求 | 需要相位编排的 chat 应用，无需调用 9 端点 API |
 
 ---
 
@@ -206,4 +213,4 @@ curl http://localhost:13155/v1/chat/completions \
 
 ---
 
-_文档版本：v1.0｜2026-07-15｜按 templates/product_recommended.md 重构_
+_文档版本：v1.0｜2026-08-14｜按 templates/product_recommended.md 重构 + V0.1.2_a（相位 chat 契约 / tc 消费收敛 / LLM 层 / 统一 token）_

@@ -162,9 +162,18 @@ synth-loop 本身不验证客户端 API Key。客户端可以传递任意值作�
 
 v0_1_1 起支持 `x-synthloop-user-id` Header 认证，三层行为（`auth.enabled` + `auth.required`）。默认关闭（`auth.enabled=false`），开箱即用。
 
+**v0.1.2_a 起 token 双轨（先验权再归身份）**：
+
+| Header | 作用 | 说明 |
+|--------|------|------|
+| `x-synthloop-token` | 权限 | 统一 token（user/service/admin scope，sha256 hash 校验），`tokens` 表签发 |
+| `x-synthloop-user-id` | 身份 | `sl-{uuid}`，透传给上游做身份映射（sm 侧 `map_user_id` → `sm-{uuid}`） |
+
 - **OpenAI 格式**：`Authorization: Bearer <any-string>`（可选）
 - **Anthropic 格式**：`x-api-key: <any-string>`（可选）
 - **用户认证**：`x-synthloop-user-id: sl-{uuid}`（v0_1_1 新增，可选）
+- **权限认证**：`x-synthloop-token: <token>`（v0.1.2_a 新增，可选）
+- **管理面**：`/api/v1/runtime-endpoints` CRUD 要求 **admin scope**（3.12），普通 user/service token → 403
 
 synth-loop 使用配置文件中的 `downstream_llm.api_key` 调用下游 LLM。
 
@@ -229,6 +238,7 @@ POST /v1/chat/completions
 | stream | boolean | 否 | 是否流式返回 |
 | packets | string[] | 否 | **v0_1_1 新增**：已提交到 `/v1/packets` 的 packet ID 列表 |
 | inline_data | object[] | 否 | **v0_1_1 新增**：降级模式下原始数据直接内联，无需先提交 |
+| synth_pipeline | object | 否 | **v0.1.2_a 新增**：相位状态字段 `{id, action}`——显式驱动相位多轮推进（confirm/reject/regenerate/regenerate_with_new_context/abort/check_result）；响应中携带 `{id, step, phase_index, phase_total, artifact_ref}`，调用方原样回传以继续 |
 
 #### messages 数组
 
@@ -563,6 +573,72 @@ GET /health
   "status": "cancelled"
 }
 ```
+
+---
+
+### 运行时端点管理（v0.1.2_a 新增）
+
+> tc 消费链路配置面。管理 API 要求 **admin scope**（3.12），token 脱敏返回。
+
+#### GET /api/v1/runtime-endpoints
+
+列出运行时端点（token 脱敏）。
+
+```json
+{
+  "items": [
+    {"id": "...", "alias": "home-service", "kind": "runtime",
+     "url": "http://10.168.1.151/text-cli/cli", "auth": "none",
+     "service_token": "sk-***", "rank": 1, "is_active": 1}
+  ],
+  "total": 1
+}
+```
+
+#### POST /api/v1/runtime-endpoints
+
+添加端点。必填 `alias` + `url`；可选 `kind`/`auth`/`service_token`/`access_token`/`rank`/`trust`/`is_active`。同 alias 可多物理行（rank 降级）。
+
+#### PATCH /api/v1/runtime-endpoints/{alias}
+
+更新端点（url/token/rank/is_active 等）。`service_token`/`access_token` 加密落库。
+
+#### DELETE /api/v1/runtime-endpoints/{alias}
+
+删除端点。
+
+---
+
+### 制品数据面（v0.1.2_a 新增）
+
+> 相位产物下行（与 packets 上行对称）。content 只含人读摘要，完整产物经 artifact_ref 获取。
+
+#### GET /api/v1/artifacts/{artifact_id}
+
+获取单个相位产物。
+
+```json
+{
+  "artifact_id": "art_p1_result_1",
+  "pipeline_id": "p1",
+  "phase_index": 1,
+  "kind": "result",
+  "content": "人读摘要...",
+  "data": {"output": "..."},
+  "created_at": "2026-08-14T03:00:00"
+}
+```
+
+#### GET /api/v1/artifacts?pipeline_id={id}
+
+按管道列出产物（按 phase_index 排序）。
+
+---
+
+### 管道管理 API（v0.1.2，`pipelines_api.enabled` 默认 false）
+
+> 9 端点管理面：创建/计划确认/启动/查询/暂停恢复中止/路径确认/审批/驳回/相位查询。
+> `enabled=false`（默认）时全部 404——对外主契约走 chat（`synth_pipeline` 字段），端点保留给调试/管理。
 
 ### 用户管理（v0_1_1 新增）
 
@@ -1077,4 +1153,4 @@ packets:
 ---
 
 *文档版本：v1.0*
-*更新时间：2026-07-06 | v0_1_1 新增端点*
+*更新时间：2026-08-14 | v0.1.2_a：token 双轨 / synth_pipeline 相位契约 / runtime-endpoints / artifacts / pipelines 开关*

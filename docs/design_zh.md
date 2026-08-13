@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v0.1.2 | **日期**：2026-07-23
+> **版本**：v0.1.2_a | **日期**：2026-08-14
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -68,7 +68,9 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | strata-match | `POST /api/v1/users` | 无 | HTTP JSON（联动注册） | `src/app/routers/admin.py` |
 | strata-match | `POST /api/v1/jobs` | 无 | HTTP JSON（open/close） | `src/app/services/job_store.py` |
 | 下游 LLM | `POST /v1/chat/completions` | API Key | OpenAI 兼容 HTTP | `src/app/services/downstream_llm.py` |
-| text-cli | `POST /text-cli/cli` | 无（内网） | HTTP JSON | `src/app/services/textcli_client.py` |
+| text-cli | `POST /text-cli/cli`（经运行时表路由） | 内网 | HTTP JSON | `src/app/services/textcli_enhanced_client.py`（v0.1.2_a） |
+
+> v0.1.2_a：`textcli_client.py` 已废弃（R5，不留兼容层）；tc 消费统一走**运行时表（`runtime_endpoints`）+ 强化客户端（`textcli_enhanced_client`）**——alias 路由 / rank 降级 / 令牌注入全在客户端内。
 
 ---
 
@@ -78,11 +80,14 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 
 | 能力 | 实现 | 说明 |
 |------|------|------|
-| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions` |
+| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions`（v0.1.2_a 含相位路由） |
 | Anthropic 入口 | `anthropic_chat.py` — 请求翻译 + dispatch | `/v1/messages` |
 | 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`（v0.1.1 新增） |
 | 健康检查 | `health.py` | `/health` |
 | 异步任务 API | `tasks.py` — GET + POST cancel | `/api/v1/tasks/{id}` |
+| 运行时表管理 API | `runtime_endpoints.py` — CRUD（v0.1.2_a） | `/api/v1/runtime-endpoints`（admin scope） |
+| 制品数据面 | `artifacts.py` — 相位产物查询（v0.1.2_a） | `/api/v1/artifacts/{id}`、`?pipeline_id=` |
+| 管道管理 API | `pipeline.py` — 9 端点（v0.1.2，`pipelines_api.enabled` 默认 false） | `/api/v1/pipelines` |
 | 管理面板 | `admin.py` — HTML 页面路由 | `/admin/sessions` 等 |
 
 ### 3.2 编排服务层（`src/app/services/`）
@@ -101,15 +106,20 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | strata-match 客户端 | `strata_match_client.py` | HTTP 客户端 + 缓存 + mock |
 | 工具适配器 | `strata_match_tool_adapter.py` | strata-match 工具 → OpenAI 格式 |
 | 工具分发器 | `tool_dispatcher.py` | 注册 + 路由工具调用 |
-| 动态工具执行 | `dynamic_tool_executor.py` | 运行时工具执行 |
+| 动态工具执行 | `dynamic_tool_executor.py` | 运行时工具执行（v0.1.2_a：走强化客户端，无 `command.replace`） |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
-| 模型选择器 | `model_selector.py` | 按复杂度选模型 |
+| 模型选择器 | `model_selector.py` | 按复杂度选模型（v0.1.2_a：6 场景含 planning/summarize） |
 | 逻辑抽象器 | `logic_abstractor.py` | 关键词判定 subtype |
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
 | Job 存储 | `job_store.py` | 跨组件 Job 协同 |
 | Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0.1.1 新增） |
 | 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0.1.1 新增） |
+| 运行时表 | `runtime_endpoints.py` | tc 端点配置面（v0.1.2_a）：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
+| 强化客户端 | `textcli_enhanced_client.py` | tc 执行面（v0.1.2_a）：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
+| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约（v0.1.2_a）：synth_pipeline 状态机 + 决策点 + 长任务 check_result |
+| 制品数据面 | `artifact_dataplane.py` | 相位产物落库（v0.1.2_a）：artifacts 表 + TTL 24h |
+| token 服务 | `token_service.py` | 统一 token（v0.1.2_a）：issue_token/verify_token/map_user_id |
 
 ### 3.3 工具层（`src/app/tools/`）
 
@@ -118,9 +128,11 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | 专家 Prompt 选择 | `select_system_prompt.py` | 根据意图选人设 |
 | 文档加载 | `load_document.py` | 加载到永久上下文区 |
 | 文档卸载 | `unload_document.py` | 从上下文区移除 |
-| text-cli 发现 | `discover_textcli.py` | 发现可用指令 |
-| text-cli 调用 | `call_textcli.py` | 执行指令 |
+| text-cli 发现 | `discover_textcli.py` | 发现可用指令（v0.1.2_a：走强化客户端 discover） |
+| text-cli 调用 | `call_textcli.py` | 执行指令（v0.1.2_a：走强化客户端 call） |
 | 上下文标签管理 | `context_manager.py` | 按标签管理永久区上下文 |
+
+> v0.1.2_a：`call_textcli`/`discover_textcli` 已从 `textcli_client` 切到强化客户端（信封直读、alias 路由）。
 
 ---
 
@@ -139,7 +151,9 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
   │
   ├── 消息前置检查层
   │     ├── Task-(.+)-synthloop 匹配 → 查 tasks 表 → 终点响应
-  │     └── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
+  │     ├── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
+  │     └── [v0.1.2_a] 相位路由：带 synth_pipeline 字段 → 解析 action → 相位编排
+  │           （相位意图识别规则优先 + 保守阈值；普通请求永不自动进相位）
   │    代码: src/app/routers/chat.py chat_completions()
   │
   ├── 复杂度分类
@@ -151,10 +165,12 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
   │     ├── a/chat → 直答
   │     ├── b/prompt_chat → strata-match 策略查询 → 注入 → LLM
   │     ├── c/task → strata-match 工具注入 → LLM 工具调用循环
+  │     │     └── [v0.1.2_a] 执行走强化客户端（alias 路由 → 运行时表 → tc）
   │     └── e,f/task_chain → 任务链拆解执行
   │    代码: src/app/routers/chat.py chat_completions() dispatch 决策链
   │
   ├── 下游 LLM 调用
+  │     └── [v0.1.2_a] chat_with_degradation：503 切同池模型 / 502/504 切端点
   │    代码: src/app/services/downstream_llm.py
   │
   └── SSE 流式响应
@@ -216,6 +232,10 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 | `/v1/chat/completions` | OpenAI | POST | 无（可选 Bearer） | `chat.py` |
 | `/v1/messages` | Anthropic | POST | 无（可选 x-api-key） | `anthropic_chat.py` |
 | `/v1/packets` | JSON | POST | 无 | `packets.py`（v0.1.1） |
+| `/api/v1/runtime-endpoints` | JSON | GET/POST/PATCH/DELETE | admin scope（v0.1.2_a） | `runtime_endpoints.py` |
+| `/api/v1/artifacts/{id}` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
+| `/api/v1/artifacts?pipeline_id=` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
+| `/api/v1/pipelines` | JSON | 9 端点 | `pipelines_api.enabled`（默认 false → 404） | `pipeline.py`（v0.1.2） |
 | `/health` | JSON | GET | 无 | `health.py` |
 | `/admin/sessions` | HTML | GET | 无 | `admin.py` |
 | `/admin/tasks` | HTML | GET | 无 | `admin.py` |
@@ -279,14 +299,16 @@ src/
 | 配置段 | 文件 | 默认值 | 代码消费方 |
 |--------|------|--------|-----------|
 | `strata_match` | `config.yaml` | url=localhost:13156, mock=false | `strata_match_client.py` |
-| `textcli` | `config.yaml` | default_endpoint=... | `textcli_client.py` |
+| `runtime_endpoints` | `config.yaml` | enabled=true, default_alias, seeds（v0.1.2_a，替代旧 `textcli` 段） | `runtime_endpoints.py` |
+| `pipelines_api` | `config.yaml` | enabled=false（v0.1.2_a 9 端点开关） | `routers/pipeline.py` |
 | `downstream_llm` | `config.yaml` | api_base, api_key, default_model | `downstream_llm.py` |
 | `auth` | `config.yaml` | enabled=false, required=false | `middleware/auth.py` |
 | `session_memory` | `config.yaml` | enabled=true | `routers/chat.py` |
 | `async_tasks` | `config.yaml` | enabled=false, max_per_user=3 | `routers/chat.py` |
 | `packets` | `config.yaml` | enabled=true, ttl_seconds=1800 | `packet_store.py`（v0.1.1） |
 | `endpoints` | `model_config.yaml` | 端点池定义 | `execution_router.py` |
-| `llm_routing` | `model_config.yaml` | 路由映射 | `execution_router.py` |
+| `llm_routing` | `model_config.yaml` | 路由映射（v0.1.2_a：6 场景含 planning/summarize） | `execution_router.py` |
+| `llm_gateway` | `model_config.yaml` | enabled=false, gateways（v0.1.2_a 多网关注册表） | `downstream_llm.py` |
 | `rules` | `complexity_rules.yaml` | chat/task_chain 规则 | `complexity_classifier.py` |
 
 ### 7.3 持久化
@@ -297,6 +319,9 @@ src/
 | `events` | `events.jsonl` | 事件日志 | 无 |
 | `users` | `gateway.db` | 用户认证（v0.1.1） | 无 |
 | `tasks` | `gateway.db` | 异步任务（v0.1.1） | 无 |
+| `runtime_endpoints` | `gateway.db` | tc 端点配置面（v0.1.2_a）：alias 多物理行 + rank 降级 + token 加密 | 无 |
+| `artifacts` | `gateway.db` | 相位产物（v0.1.2_a）：pipeline_id/phase_index/type/ref/data，TTL 24h | 无 |
+| `tokens` | `gateway.db` | 统一 token（v0.1.2_a）：sha256 hash + scope 分层 | 无 |
 
 ---
 
@@ -307,9 +332,10 @@ src/
 | 假设 | 影响 | 当前措施 |
 |------|------|---------|
 | 部署在内网，外部不可直达 | 低——内网隔离 | 无额外认证（出厂默认） |
-| 恶意客户端伪造 user-id | 中——多租户场景 | `auth.enabled=true, required=true` 时强制校验 |
+| 恶意客户端伪造 user-id | 中——多租户场景 | `auth.enabled=true, required=true` 时强制校验（v0.1.2_a：+ token 双轨） |
 | 下游 LLM API Key 泄露 | 高——财务损失 | Key 配在 config.yaml 中，建议环境变量注入 |
 | Prompt 注入 | 中——越狱风险 | 无专门检测（v0.2 计划） |
+| tc 令牌外泄（v0.1.2_a） | 高 | 运行时表 token 加密（`SELF_TOKEN_ENC_KEY`）+ 管理 API 脱敏 + admin scope |
 
 **最坏情况推演**：config.yaml 泄露 → 攻击者可调用下游 LLM 产生费用。缓解：生产环境使用 `${ENV_VAR}` 环境变量注入（`_resolve_env_vars()` 内置支持，见 `src/app/config.py`）。
 
@@ -320,6 +346,7 @@ src/
 | 网络分层 | `auth.enabled` 配置控制，默认关闭（开箱即用） |
 | 敏感信息 | 代码中无硬编码密钥（D1-D5 纪律红线 D5 约束对外措辞） |
 | Session 隔离 | `x-synthloop-session-id` 隔离会话，`x-synthloop-user-id` 隔离用户 |
+| token 双轨（v0.1.2_a） | `x-synthloop-token`（user/service/admin scope）验权 → `x-synthloop-user-id` 归身份；运行时表管理 API 要求 admin scope |
 
 ---
 
@@ -372,6 +399,7 @@ src/
 | v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | 基线版本——功能完整度 |
 | v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
 | v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道大脑 |
+| v0.1.2_a | tc 消费链路收敛（运行时表 + 强化客户端 + textcli_client 废弃）+ LLM 层（6 场景 + 降级）+ 相位 chat 契约（synth_pipeline 多轮）+ 统一 token；72 测试全绿 | 纠偏版本（不升版本号） |
 | v0.2（规划） | 质量反馈分析 + 路由准确率可观测 | 闭环版本——骨架填肉 |
 
 ---
@@ -385,6 +413,8 @@ src/
 | `_check_cancelled()` 使用 aiosqlite 同步查询 | 高频场景有性能隐患 | 骨架阶段简化实现 |
 | `FRACTAL_SYSTEM_PROMPT` 硬编码在 `chat.py` | prompt 改动需改代码 | 未配置化 |
 | DB 访问模式不一致（本地 import vs 全局） | 可维护性问题 | 历史遗留 |
+| 相位执行为"简化执行"（v0.1.2_a） | `_execute_phase` 提交空 steps path；`_check_result` 返回"仍在执行中" | mock 环境裁剪，真实 LLM→path→tc 链路待真实联调验证 |
+| 相位 LLM 决策路径未被测试（v0.1.2_a） | 测试走降级默认规划，规划质量未验证 | 测试环境 mock LLM |
 
 ### 代码债表
 
@@ -444,7 +474,9 @@ curl -s http://localhost:13155/v1/chat/completions \
 | **单一真相来源** | 规则→yaml，模型→yaml，配置→yaml | `complexity_rules.yaml`、`model_config.yaml`、`config.yaml` |
 | **无状态组件优先** | 核心决策组件不持有状态 | ComplexityClassifier / ModelSelector / LogicAbstractor |
 | **Dispatch 是模式不是 API** | 嵌入已有端点，不增新路由 | 分形决策嵌入 `/v1/chat/completions` 内部 |
+| **相位显式触发（v0.1.2_a）** | 相位是执行编排的可选模块，普通请求永不自动进相位 | `synth_pipeline` 字段 + R6 保守阈值 |
+| **指令优先（v0.1.2_a）** | LLM 拼 `AI:` 指令，sl 只校验透传，杜绝双前缀 | `dynamic_tool_executor` + 强化客户端 |
 
 ---
 
-_文档版本：v1.0｜2026-07-15｜新增 §十三 架构预留_
+_文档版本：v1.0｜2026-08-14｜新增 §十三 架构预留 + V0.1.2_a（tc 消费收敛/LLM 层/相位 chat 契约/统一 token）_
