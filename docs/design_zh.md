@@ -15,7 +15,7 @@ synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**（_b �
 
 ```
 API 代理：请求 → 转发 → 响应（不改语义）
-synth-loop：请求 → [相位前置拦截（"用相位/用链"→ pk 相位推理）] → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 任务链推理 → 唯一推理落点 → 流式返回
+synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` 标签 → pk 相位推理）] → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 任务链推理 → 唯一推理落点 → 流式返回
 ```
 
 ### 是什么 / 不是什么
@@ -160,7 +160,6 @@ synth-loop：请求 → [相位前置拦截（"用相位/用链"→ pk 相位推
   │     ├── Task-(.+)-synthloop 匹配 → 查 tasks 表 → 终点响应
   │     ├── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
   │     └── [_b] 相位路由：带 synth_pipeline 字段 → 解析 action → pk 相位推理（薄壳委托）
-  │           （相位意图识别规则优先 + 保守阈值，返回模式档 structural/chain；普通请求永不自动进相位）
   │    代码: src/app/routers/chat.py chat_completions()
   │
   ├── 复杂度分类
@@ -168,10 +167,10 @@ synth-loop：请求 → [相位前置拦截（"用相位/用链"→ pk 相位推
   │     └── 层2: 分形 Prompt（1 次 LLM 调用）
   │    代码: src/app/services/complexity_classifier.py
   │
-  ├── [_b] 相位前置拦截：命中"用相位/用链"显式词 → 直接路由到 pk 相位推理（不走分形）
-  │     ├── "用相位"/"用管道" → 结构分形（structural，复杂）
-  │     └── "用链"/"链式"     → 链式分形（chain，中等）
-  │     （未命中相位 → 进入分形路由 ↓）
+  ├── [_b] 相位前置拦截：命中相位 XML 标签 → 直接路由到 pk 相位推理（不走分形）
+  │     ├── <tc-phase>目标</tc-phase>           → 结构分形（structural，复杂）
+  │     └── <tc-phase-chain>目标</tc-phase-chain> → 链式分形（chain，中等）
+  │     （标签显式锁定，标签内文本为相位目标；无标签 → 进入分形路由 ↓）
   │
   ├── 分形路由（选一条路径，相位不在此列）
   │     ├── a/chat → 直答

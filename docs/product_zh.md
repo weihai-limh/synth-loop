@@ -84,17 +84,17 @@ curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"先分析这个项目的认证模块安全性，然后生成改进方案"}]}'
 
-# 4. 体验相位推理——结构分形（复杂任务，触发词"用相位"）
+# 4. 体验相位推理——结构分形（复杂任务，用 <tc-phase> 标签触发）
 curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"请用相位模式帮我完成一份市场调研报告"}]}'
-# → 返回 synth_pipeline（awaiting_plan_confirm），回传 {id, action:"confirm"} 逐相位推进
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"<tc-phase>帮我完成一份市场调研报告</tc-phase>"}]}'
+# → 标签显式锁定相位（structural），返回 synth_pipeline（awaiting_plan_confirm），回传 {id, action:"confirm"} 逐相位推进
 
-# 5. 体验相位推理——链式分形（中等任务，触发词"用链"）
+# 5. 体验相位推理——链式分形（中等任务，用 <tc-phase-chain> 标签触发）
 curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"请用链式相位处理这个中等复杂度任务"}]}'
-# → 链式分形（chain）：根相位分形出多相位，子相位直接出 path（钳制深度），适合中等任务
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"<tc-phase-chain>处理这个中等复杂度任务</tc-phase-chain>"}]}'
+# → 标签显式锁定相位（chain）：根相位分形出多相位，子相位直接出 path（钳制深度），适合中等任务
 ```
 
 ### 🟣 推荐入口
@@ -179,7 +179,7 @@ curl http://localhost:13155/v1/chat/completions \
 | **普通模式** | 请求 → synth-loop 分类 + 路由 → 下游 LLM | 个人开发、快速体验 |
 | **增强模式** | 请求 → synth-loop → 策略注入 → 下游 LLM | 生产使用，需专家 Prompt + 技能分片 |
 | **完整模式** | 请求 → synth-loop → 策略注入 + 工具调度 → 下游 LLM | 复杂任务链，需跨服务工具调用 |
-| **相位模式（v0.1.2，_b 整体替换为 pk）** | 显式触发（"用相位/用链"）→ pk 分形相位树推进（规划→路径确认→执行→摘要，经推理缝收敛唯一落点） | 多步骤创作/开发/设计流程，需人工审查节点；执行经推理缝 LLM（非 text-cli） |
+| **相位模式（v0.1.2，_b 整体替换为 pk）** | 标签显式锁定（`<tc-phase>` structural / `<tc-phase-chain>` chain）→ pk 分形相位树推进（规划→路径确认→执行→摘要，经推理缝收敛唯一落点） | 多步骤创作/开发/设计流程，需人工审查节点；执行经推理缝 LLM（非 text-cli） |
 | **统一闸模式（v0.1.2_b）** | gate_manager 编排 ck/pk 闸，经 `/gate-manager/config` 切换组合；开闸时上下文 park 可 peek/amend | 需要上下文可干预/优化的应用，为未来自动化优化留可能 |
 
 ---

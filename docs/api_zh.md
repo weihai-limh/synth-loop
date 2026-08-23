@@ -50,14 +50,14 @@ synth-loop 提供与 OpenAI 和 Anthropic 完全兼容的 API，客户端只需�
 
 **分形决策**：
 
-synth-loop 采用**分形 Prompt** 分级决策，为每次请求**选一条最经济的路径**（v0_1_1: 6 级 a-f）。**注意：相位推理（pk）不走问题分形**——它在分形决策**之前**的消息前置检查层被独立拦截（命中"用相位/用链"等显式词即直接路由到相位编排器，永不进入分形路由）：
+synth-loop 采用**分形 Prompt** 分级决策，为每次请求**选一条最经济的路径**（v0_1_1: 6 级 a-f）。**注意：相位推理（pk）不走问题分形**——它在分形决策**之前**的消息前置检查层被独立拦截（命中相位 XML 标签即直接路由到相位编排器，永不进入分形路由）：
 
 ```
 请求 → 消息前置检查层（分形决策之前）
-  ├── 相位意图："用相位"/"用管道" → 结构分形相位（structural）
-  ├──          "用链"/"链式"       → 链式相位（chain）
-  │     （保守阈值：未命中显式词，普通请求永不自动进相位）
-  └── 未命中相位 → 进入分形决策 ↓
+  ├── 相位标签：<tc-phase>目标</tc-phase>           → 结构分形相位（structural）
+  ├──          <tc-phase-chain>目标</tc-phase-chain> → 链式相位（chain）
+  │     （标签显式锁定；标签内文本为相位目标；无标签普通请求永不自动进相位）
+  └── 未命中相位标签 → 进入分形决策 ↓
 
 分形决策 → 规则匹配（免费，<1ms，仅覆盖两端极值）
   ├── "你好"/"hello" → chat（直答，零开销，~235 token）
@@ -247,7 +247,7 @@ POST /v1/chat/completions
 | stream | boolean | 否 | 是否流式返回 |
 | packets | string[] | 否 | **v0_1_1 新增**：已提交到 `/v1/packets` 的 packet ID 列表 |
 | inline_data | object[] | 否 | **v0_1_1 新增**：降级模式下原始数据直接内联，无需先提交 |
-| synth_pipeline | object | 否 | **v0.1.2_a 新增**：相位状态字段 `{id, action}`——显式驱动相位多轮推进（confirm/reject/regenerate/regenerate_with_new_context/abort/check_result）；响应中携带 `{id, step, phase_index, phase_total, artifact_ref}`，调用方原样回传以继续。相位触发词：`用相位`/`用管道`（结构分形 structural，复杂任务）、`用链`/`链式`（链分形 chain，中等任务）；未命中规则绝不自动进相位（保守阈值） |
+| synth_pipeline | object | 否 | **v0.1.2_a 新增**：相位状态字段 `{id, action}`——显式驱动相位多轮推进（confirm/reject/regenerate/regenerate_with_new_context/abort/check_result）；响应中携带 `{id, step, phase_index, phase_total, artifact_ref}`，调用方原样回传以继续。**相位触发（_b 标签机制）**：首轮用 `<tc-phase>目标</tc-phase>`（结构分形 structural，复杂任务）或 `<tc-phase-chain>目标</tc-phase-chain>`（链式分形 chain，中等任务）显式触发；标签内文本为相位目标；无标签普通请求永不自动进相位 |
 
 #### messages 数组
 
@@ -1228,4 +1228,4 @@ packets:
 ---
 
 *文档版本：v1.1*
-*更新时间：2026-08-23 | v0.1.2_b：统一闸 /gate-manager + 开闸 pending + 相位模式档 + 多场景模型配置*
+*更新时间：2026-08-23 | v0.1.2_b：统一闸 /gate-manager + 开闸 pending + 相位标签触发（<tc-phase>/<tc-phase-chain>）+ 多场景模型配置*
