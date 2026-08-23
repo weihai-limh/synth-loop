@@ -15,7 +15,7 @@ synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**（_b �
 
 ```
 API 代理：请求 → 转发 → 响应（不改语义）
-synth-loop：请求 → 复杂度分类 → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 相位/任务链推理 → 唯一推理落点 → 流式返回
+synth-loop：请求 → [相位前置拦截（"用相位/用链"→ pk 相位推理）] → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 任务链推理 → 唯一推理落点 → 流式返回
 ```
 
 ### 是什么 / 不是什么
@@ -168,11 +168,16 @@ synth-loop：请求 → 复杂度分类 → 分形路由（选一条路径）→
   │     └── 层2: 分形 Prompt（1 次 LLM 调用）
   │    代码: src/app/services/complexity_classifier.py
   │
-  ├── 分形路由（选一条路径）
+  ├── [_b] 相位前置拦截：命中"用相位/用链"显式词 → 直接路由到 pk 相位推理（不走分形）
+  │     ├── "用相位"/"用管道" → 结构分形（structural，复杂）
+  │     └── "用链"/"链式"     → 链式分形（chain，中等）
+  │     （未命中相位 → 进入分形路由 ↓）
+  │
+  ├── 分形路由（选一条路径，相位不在此列）
   │     ├── a/chat → 直答
   │     ├── b/prompt_chat → strata-match 策略查询 → 注入
   │     ├── c/task → strata-match 工具注入 → LLM 工具调用循环
-  │     └── e,f/task_chain / 相位 → 任务链 / pk 相位推理
+  │     └── e,f/task_chain → 任务链拆解执行
   │    代码: src/app/routers/chat.py chat_completions() dispatch 决策链
   │
   ├── [_b] 主路径归并：所有分支经 build_messages 收束 → sl_llm_provider（唯一推理落点）

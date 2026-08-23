@@ -52,9 +52,9 @@ An intelligent switching hub exposed as an LLM gateway — **externally an LLM g
 
 ## How it works / 它怎么工作
 
-Fractal routing picks **one path** per request — simple chat → direct chat/prompt_chat (strategy injection); complex task → task_chain / phase reasoning (pk). Then context kernel (ck) assembles context + gate listens; unified gate (gate_manager) orchestrates ck/pk gates across the kernel loop; all inference converges to one inference point (`sl_llm_provider`).
+Requests are intercepted before fractal routing: explicit phase intent ("用相位"/"用链") routes to phase reasoning (pk, structural/chain); otherwise fractal routing picks **one path** — simple chat → chat/prompt_chat (strategy injection), complex task → task_chain. Then context kernel (ck) assembles context + gate listens; unified gate (gate_manager) orchestrates ck/pk gates across the kernel loop; all inference converges to one inference point (`sl_llm_provider`).
 
-分形路由为每次请求**选一条路径**——简单对话 → chat/prompt_chat（策略注入）；复杂任务 → task_chain / 相位推理（pk 分形相位树）。随后上下文内核（ck）拼装 + 闸监听，统一闸（gate_manager）跨内核编排，所有推理收束到唯一推理落点（`sl_llm_provider`）。相位执行经推理缝 LLM（非 text-cli）。
+相位在分形决策**之前**被前置拦截（命中"用相位/用链"显式词即直接进相位推理，pk 结构/链式分形相位树；**不走问题分形**）；未命中相位才进入分形路由——简单对话 → chat/prompt_chat（策略注入），复杂任务 → task_chain。随后上下文内核（ck）拼装 + 闸监听，统一闸（gate_manager）跨内核编排，所有推理收束到唯一推理落点（`sl_llm_provider`）。相位执行经推理缝 LLM（非 text-cli）。
 
 ---
 
