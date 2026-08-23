@@ -56,6 +56,19 @@ class TestModelSelector:
         assert ep is not None
         assert model
 
+    def test_normal_passthrough_falls_back_chat(self, selector):
+        """_b P5.2：normal 透传后由 execution_router 回落 chat（等价普通执行用主力默认，无白名单截断）"""
+        ep_n, m_n = selector.select("normal")
+        ep_c, m_c = selector.select("chat")
+        assert ep_n == ep_c, "normal 应回落 chat 场景"
+        assert m_n == m_c
+
+    def test_new_scenario_passthrough(self, selector):
+        """_b P5.2：任意新 service 透传 execution_router（配置驱动可扩展，无 service_map 白名单截断）"""
+        # 未来新增场景（配置里加 service 即可接通，代码无需改）
+        ep, model = selector.select("brand_new_service_type")
+        assert ep is not None and model  # 由 execution_router 回落，而非被截断
+
 
 class TestLLMGatewayConfig:
     """llm_gateway 配置面（enabled=false 零影响）"""

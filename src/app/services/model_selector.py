@@ -16,31 +16,25 @@ class ModelSelector:
     def __init__(self, router: Optional[ExecutionRouter] = None):
         self._router = router or get_execution_router()
 
-    def select(self, complexity: str, logic_category: Optional[str] = None) -> tuple[Optional[str], str]:
+    def select(self, service: str, logic_category: Optional[str] = None) -> tuple[Optional[str], str]:
         """
-        根据 complexity 级别选择模型
+        直接透传 service 给 execution_router（_b P5.2 修复：llm_routing 配置为唯一真源）。
+
+        移除硬编码 service_map 白名单——此前它截断未列出的 service（回落 chat），
+        导致多模型多场景配置机制无法扩展。现在任意 service 名都透传到 execution_router，
+        从 llm_routing 配置读取；未配置的 service（如 normal）由 execution_router 自动
+        回落 chat（其 L99-102 fallback 机制），无需白名单。
 
         Args:
-            complexity: chat / prompt_chat / task_chain / planning / summarize
-            logic_category: subtype（可选，用于精细化选择）
+            service: 服务场景名（chat / prompt_chat / task_chain / analysis /
+                     planning / summarize / normal / 未来新增场景）
+            logic_category: subtype（可选，未来精细化选择的预留维度，当前不参与）
 
         Returns:
             (endpoint_name, model_name)
         """
-        # 映射：complexity → llm_routing service name（_a P3: 4→6 场景；_b P2: normal=chat 主力默认）
-        service_map = {
-            "chat": "chat",
-            "prompt_chat": "prompt_chat",
-            "task_chain": "task_chain",
-            "analysis": "analysis",
-            "planning": "planning",
-            "summarize": "summarize",
-            "normal": "chat",  # _b P2：normal（pk 普通执行）= chat 场景（主力默认模型）
-        }
-        service_name = service_map.get(complexity, "chat")
-
-        endpoint, model = self._router.resolve_endpoint(service_name, "primary")
+        endpoint, model = self._router.resolve_endpoint(service, "primary")
         if endpoint is None:
-            logger.error(f"ModelSelector: no endpoint for service '{service_name}'")
+            logger.error(f"ModelSelector: no endpoint for service '{service}'")
             return None, ""
         return endpoint.name, model
