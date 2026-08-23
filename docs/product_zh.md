@@ -83,6 +83,18 @@ curl http://localhost:13155/v1/chat/completions \
 curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"先分析这个项目的认证模块安全性，然后生成改进方案"}]}'
+
+# 4. 体验相位推理——结构分形（复杂任务，触发词"用相位"）
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"请用相位模式帮我完成一份市场调研报告"}]}'
+# → 返回 synth_pipeline（awaiting_plan_confirm），回传 {id, action:"confirm"} 逐相位推进
+
+# 5. 体验相位推理——链式分形（中等任务，触发词"用链"）
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"请用链式相位处理这个中等复杂度任务"}]}'
+# → 链式分形（chain）：根相位分形出多相位，子相位直接出 path（钳制深度），适合中等任务
 ```
 
 ### 🟣 推荐入口
