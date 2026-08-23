@@ -32,12 +32,26 @@ from .model_selector import ModelSelector
 logger = logging.getLogger(__name__)
 
 # 相位意图显式表达词（规则层，R6——规则未命中绝不触发）
+# P1（_b）：拆成两组——结构分形（structural，复杂任务）∥ 链式分形（chain，中等任务）。
+# detect_phase_intent 返回模式档（structural/chain/None），而非 bool。
+_PHASE_MODE_STRUCTURAL = "structural"
+_PHASE_MODE_CHAIN = "chain"
+
+# 结构分形显式词：相位按结构层层展开（复杂任务）
 _PHASE_INTENT_PATTERNS = [
     r"用相位",
     r"用管道",
     r"pipeline\s*模式",
     r"分阶段(执行|处理|完成)",
     r"相位(模式|驱动)",
+]
+
+# 链式分形显式词：相位根分形、子相位直接 LEAF 出 path（中等任务）
+_PHASE_CHAIN_PATTERNS = [
+    r"用链",
+    r"链式(相位|模式|处理)",
+    r"chain\s*(模式|处理)",
+    r"中等复杂度(相位|管道)?",
 ]
 
 # 决策点 step 枚举
@@ -80,12 +94,20 @@ class PhaseChatOrchestrator:
     # 相位意图识别（R6：规则优先 + 保守阈值）
     # ═══════════════════════════════════════════════════════════
 
-    def detect_phase_intent(self, user_text: str) -> bool:
-        """规则层：显式表达词命中才触发；规则未命中绝不触发（保守，防误触发）"""
+    def detect_phase_intent(self, user_text: str) -> Optional[str]:
+        """规则层：返回相位模式档（P1，_b）。
+
+        返回 `structural`（结构分形，复杂任务）/ `chain`（链分形，中等任务）/ `None`（不触发）。
+        规则未命中绝不触发（保守，防误触发，R6）。链式词优先于结构词判定（更具体）。
+        """
+        # 链式显式词优先（更具体，代表用户指定链式模式）
+        for pattern in _PHASE_CHAIN_PATTERNS:
+            if re.search(pattern, user_text, re.IGNORECASE):
+                return _PHASE_MODE_CHAIN
         for pattern in _PHASE_INTENT_PATTERNS:
             if re.search(pattern, user_text, re.IGNORECASE):
-                return True
-        return False
+                return _PHASE_MODE_STRUCTURAL
+        return None
 
     # ═══════════════════════════════════════════════════════════
     # 主入口：处理一次 chat（相位模式）
@@ -103,9 +125,10 @@ class PhaseChatOrchestrator:
         if synth_pipeline and synth_pipeline.get("id"):
             return await self._handle_action(synth_pipeline, user_text, session_id, user_id)
 
-        # 新发起：相位意图（规则命中才触发）
-        if self.detect_phase_intent(user_text):
-            return await self._start_planning(user_text, session_id, user_id)
+        # 新发起：相位意图（规则命中才触发，P1 返回模式档 structural/chain）
+        mode = self.detect_phase_intent(user_text)
+        if mode is not None:
+            return await self._start_planning(user_text, session_id, user_id, mode=mode)
 
         # 未命中 → 不进入相位（普通请求走原路径）
         raise PhaseNotTriggeredError()
@@ -115,7 +138,8 @@ class PhaseChatOrchestrator:
     # ═══════════════════════════════════════════════════════════
 
     async def _start_planning(self, user_text: str, session_id: Optional[str],
-                              user_id: Optional[str]) -> dict:
+                              user_id: Optional[str],
+                              mode: Optional[str] = None) -> dict:
         pipeline_id = str(uuid4())
         session = PipelineSession(
             intent=user_text,
@@ -131,7 +155,7 @@ class PhaseChatOrchestrator:
         plan = await self._generate_overall_plan(user_text)
         phases = [
             PhaseConfig(index=p["index"], name=p["name"], description=p.get("description", ""),
-                        mode=p.get("mode", "single_ai"))
+                        mode=p.get("mode") or mode or "single_ai")
             for p in plan
         ]
         session.plan_config = PlanConfig(phases=phases)

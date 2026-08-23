@@ -27,7 +27,7 @@ class ModelSelector:
         Returns:
             (endpoint_name, model_name)
         """
-        # 映射：complexity → llm_routing service name（_a P3: 4→6 场景）
+        # 映射：complexity → llm_routing service name（_a P3: 4→6 场景；_b P2: normal=chat 主力默认）
         service_map = {
             "chat": "chat",
             "prompt_chat": "prompt_chat",
@@ -35,6 +35,7 @@ class ModelSelector:
             "analysis": "analysis",
             "planning": "planning",
             "summarize": "summarize",
+            "normal": "chat",  # _b P2：normal（pk 普通执行）= chat 场景（主力默认模型）
         }
         service_name = service_map.get(complexity, "chat")
 
