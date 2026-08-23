@@ -86,8 +86,8 @@ class SlInferenceSeam:
                 except Exception as e:
                     logger.warning(f"SlInferenceSeam: ck 闸监听跳过: {e}")
 
-        # 4. async 唯一推理落点（routing → 三档模型）
-        response = await self.llm_provider.chat(messages, routing=routing)
+        # 4. async 唯一推理落点（service=routing → 三档模型；routing 即服务场景）
+        response = await self.llm_provider.chat(messages, service=routing)
 
         # 5. 回填 InferenceResult（content / context_id / phase_path 一致）
         choice = response.get("choices", [{}])[0]

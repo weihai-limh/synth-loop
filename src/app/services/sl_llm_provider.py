@@ -1,25 +1,30 @@
 # -*- coding: utf-8 -*-
-"""sl_llm_provider —— 唯一推理收束点（_b P5.1）
+"""sl_llm_provider —— 唯一推理收束点（_b P5.1 + P5.2 归并，所有 chat 路径过闸）
 
-依据：`concept_V0_1_2_b 主线 E` + `integration_sl_draft`（推理收束唯一落点）。
+依据：`concept_V0_1_2_b 主线 E` + `integration_sl_draft`（推理收束唯一落点）+ 用户裁决
+（5.2 主路径归并进 build_messages 收束点；**所有 chat 上下文都要过 ck 闸**——为未来自动化优化留可能）。
 
-职责：在 `downstream_llm` 之上包一层 **async** 唯一推理落点，所有推理路径
-（主/相位/工具）收敛到此。核心能力：
-- **三档模型映射**（P2）：routing（planning/normal/summarize）→ 模型档。
-  planning/summarize 走 `llm_routing` 覆盖档；normal 走 chat 主力默认档。
-- **async 桥接**：ck 推理缝暴露到 build_messages 后，此处为 async 推理出口
-  （经 downstream_llm.chat / chat_with_degradation），化解 ck sync / sl async 鸿沟。
+职责：
+- **唯一推理落点**：所有路径（主 chat/prompt_chat/fractal/task_chain + 相位 planning/normal/summarize）
+  收敛到此，经 `downstream_llm` 调下游 LLM。
+- **通用 service 选择**：主路径传 complexity（chat/prompt_chat/task_chain/...）、相位传
+  routing（planning/summarize/normal）→ 统一经 `model_selector.select(service)` 选模型。
+- **context_id 生成 + ck 闸集成**：主路径也生成 context_id；若 ck gate_mode == auto → 
+  `build_passthrough(messages)` → ck `gate_park.park` → 返回 `{gate:"pending", context_id, context}`
+  （等闸干预，peek/amend 后再 gate_set 出结果）；若 closed → 直接推理。
+  这样所有 chat 上下文可被 ck 闸监听/优化。
 
-routing 语义（pk 推理缝三档）：
-- "planning"：规划（selector.select("planning")）
-- "summarize"：摘要（selector.select("summarize")）
-- "normal" / None：普通执行（selector.select("normal") → chat 主力默认）
+gate 返回（开闸时）：
+  {gate: "pending", context_id: str, context: {region: {次序: content}}}
+closed 返回：
+  下游 LLM 响应 dict（choices/usage 等）。
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from uuid import uuid4
 
 from .downstream_llm import get_downstream_llm
 from .model_selector import ModelSelector
@@ -28,45 +33,83 @@ logger = logging.getLogger(__name__)
 
 
 class SlLlmProvider:
-    """唯一推理收束点（async）：routing → 模型档 → downstream_llm。"""
+    """唯一推理收束点：通用 service 选择 + ck 闸集成 + context_id 生成。"""
 
     def __init__(self, llm: Optional[Any] = None,
-                 selector: Optional[ModelSelector] = None) -> None:
+                 selector: Optional[ModelSelector] = None,
+                 ck: Optional[Any] = None) -> None:
         self._llm = llm or get_downstream_llm()
         self._selector = selector or ModelSelector()
+        self._ck = ck  # vendored ck 内核（可选；注入后启用 ck 闸）
 
-    # ── routing → 模型档（P2 三档）──
+    # ── ck 内核注入（启用 ck 闸，所有 chat 路径过闸）──
 
-    def select_model_for_routing(self, routing: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """routing（pk 推理缝三档）→ (endpoint_name, model)。
+    def set_ck(self, ck: Optional[Any]) -> None:
+        """注入 vendored ck 内核（开闸时所有 chat 上下文可被 ck 闸监听/优化）"""
+        self._ck = ck
 
-        - planning → select("planning")
-        - summarize → select("summarize")
-        - normal / None → select("normal")（chat 主力默认）
+    # ── context_id 生成（统一函数）──
+
+    def generate_context_id(self) -> str:
+        """生成 context_id（所有 chat 路径共用；开闸时在调用时拿一个 id）"""
+        return uuid4().hex
+
+    # ── 通用 service 选择 ──
+
+    def select_model(self, service: Optional[str]) -> tuple[Optional[str], str]:
+        """service（complexity 或 routing）→ (endpoint_name, model)。
+
+        - 相位 routing：planning / summarize / normal（normal→chat 主力默认，P2）
+        - 主路径 complexity：chat / prompt_chat / task_chain / ...
+        - None → chat 默认
         """
-        if routing == "planning":
-            return self._selector.select("planning")
-        if routing == "summarize":
-            return self._selector.select("summarize")
-        return self._selector.select("normal")
+        return self._selector.select(service or "chat")
 
     # ── async 唯一推理落点 ──
 
     async def chat(
         self,
         messages: list[dict[str, Any]],
-        routing: Optional[str] = None,
+        service: Optional[str] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         tools: Optional[list[dict[str, Any]]] = None,
+        context_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        ext: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """唯一推理落点：经 downstream_llm 调下游 LLM。
+        """唯一推理落点。service 决定模型档；显式 model 优先。
 
-        routing 决定模型档（P2 三档）；显式 model 优先于 routing 档。
+        开闸（ck gate_mode == auto）：生成 context_id + ck park → 返回 pending（等闸干预）。
+        关闸（closed）：直接推理返回下游响应。
         """
-        endpoint_name, routing_model = self.select_model_for_routing(routing)
-        effective_model = model or routing_model
+        # ck 闸集成：开闸时 park 返回 pending（所有 chat 上下文过闸）
+        if self._ck is not None:
+            from ..kernels.context_kernel.core.assembler import build_passthrough
+            from ..kernels.context_kernel.core.gate import extract_custom_context
+            from ..kernels.context_kernel.core.models import GateMode
+            if self._ck.gate_mode == GateMode.AUTO:
+                cid = context_id or self.generate_context_id()
+                assembled = build_passthrough(messages)
+                parked_id = self._ck.gate_park.park(
+                    assembled=assembled,
+                    session_view=None,
+                    ext=ext,
+                    model=model,
+                    session_id=session_id,
+                )
+                custom = extract_custom_context(assembled)
+                logger.info(f"sl_llm_provider: 开闸 park (context_id={parked_id}, service={service})")
+                return {
+                    "gate": "pending",
+                    "context_id": parked_id,
+                    "context": custom.to_dict()["regions"],
+                }
+
+        # closed：直接推理（经 downstream_llm，多端点/降级）
+        endpoint_name, service_model = self.select_model(service)
+        effective_model = model or service_model
         try:
             if endpoint_name and self._llm._execution_router:
                 return await self._llm.chat_with_degradation(
@@ -79,24 +122,31 @@ class SlLlmProvider:
                 **kwargs,
             )
         except Exception as e:
-            logger.error(f"sl_llm_provider 推理失败 (routing={routing}): {e}")
+            logger.error(f"sl_llm_provider 推理失败 (service={service}): {e}")
             raise
 
     async def chat_stream(
         self,
         messages: list[dict[str, Any]],
-        routing: Optional[str] = None,
+        service: Optional[str] = None,
         model: Optional[str] = None,
         **kwargs: Any,
     ):
-        """流式推理落点（SSE）——下游 streaming_handler 复用。"""
-        endpoint_name, routing_model = self.select_model_for_routing(routing)
-        effective_model = model or routing_model
-        return self._llm.stream_openai(
+        """流式推理落点（SSE，经 StreamingHandler.stream_openai）。"""
+        from .streaming_handler import StreamingHandler
+        endpoint_name, service_model = self.select_model(service)
+        effective_model = model or service_model
+        return StreamingHandler.stream_openai(
             messages=messages, model=effective_model,
             api_base=self._llm.api_base,
             api_key=kwargs.get("api_key") or self._llm.default_api_key,
         )
+
+    # ── 兼容旧 routing 调用（SlInferenceSeam 曾用 select_model_for_routing）──
+
+    def select_model_for_routing(self, routing: Optional[str]) -> tuple[Optional[str], str]:
+        """routing 三档 → model（向后兼容相位推理缝调用）。"""
+        return self.select_model(routing)
 
 
 # 全局实例

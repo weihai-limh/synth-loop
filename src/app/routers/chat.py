@@ -45,6 +45,7 @@ from ..services.asset_consumer import get_asset_consumer
 from ..services.degradation_manager import get_degradation_manager, DegradationLevel
 from ..services.packet_store import get_packet_store
 from ..services.preprocessors import preprocess_packet
+from ..services.sl_llm_provider import get_sl_llm_provider
 from ..config import get_packets_settings
 
 router = APIRouter(tags=["chat"])
@@ -152,7 +153,16 @@ def init_services() -> None:
     global FRACTAL_SYSTEM_PROMPT
     from ..config import load_fractal_prompt
     FRACTAL_SYSTEM_PROMPT = load_fractal_prompt()
-    
+
+    # _b P5.2: 主路径过闸——注入 ck 内核到 sl_llm_provider（开闸时所有 chat 上下文可被 ck 闸优化）
+    try:
+        from ..services.kernel_adapters import build_sl_context_kernel
+        _ck = build_sl_context_kernel()
+        get_sl_llm_provider().set_ck(_ck)
+        logger.info("sl_llm_provider ck 内核已注入（主路径过闸就绪）")
+    except Exception as e:
+        logger.warning(f"sl_llm_provider ck 注入失败（降级无闸）: {e}")
+
     logger.info(f"Registered tools: {list(tool_dispatcher.registry.keys())}")
     logger.info(f"Tool definition count: {len(tool_dispatcher.definitions)}")
 
@@ -358,14 +368,18 @@ async def chat_completions(
 
 
 async def _handle_chat_level(request, session, user_text, current_user_content, client_system_messages, api_key):
-    """chat 级：简单对话，直连下游 LLM（v0_1_1: 语言保持 prompt 注入）"""
+    """chat 级：简单对话，经 sl_llm_provider 唯一推理落点（_b P5.2，主路径过闸）"""
     messages = context_router.build_messages(session, current_user_content=current_user_content)
     messages.insert(0, {"role": "system", "content": LANGUAGE_KEEP_PROMPT})
-    endpoint_name, model = model_selector.select("chat")
-    response = await downstream_llm.chat(
-        messages=messages, model=model or request.model, api_key=api_key,
-        endpoint_name=endpoint_name,
+    # 归并进 build_messages 收束点：经 sl_llm_provider（唯一推理落点 + ck 闸）
+    provider = get_sl_llm_provider()
+    response = await provider.chat(
+        messages=messages, service="chat", model=request.model,
+        api_key=api_key, session_id=session.session_id,
     )
+    # 开闸：返回 pending（带 context_id），等 ck 闸干预（peek/amend）后出结果
+    if isinstance(response, dict) and response.get("gate") == "pending":
+        return _gate_pending_response(response, session)
     choice = response.get("choices", [{}])[0]
     session.temp_history.append({"role": "user", "content": current_user_content})
     session.temp_history.append(choice.get("message", {}))
@@ -396,16 +410,22 @@ async def _handle_prompt_chat_level(request, session, user_text, complexity, log
         if loop == 0:
             messages.insert(0, {"role": "system", "content": LANGUAGE_KEEP_PROMPT})
         tools = tool_dispatcher.merge_client_tools(request.tools)
-        endpoint_name, model = model_selector.select(complexity, logic_category)
 
+        # _b P5.2：经 sl_llm_provider 唯一推理落点（service=complexity + 主路径过闸）
+        provider = get_sl_llm_provider()
         try:
-            response = await downstream_llm.chat(
-                messages=messages, model=model or request.model, tools=tools if tools else None,
-                api_key=api_key, endpoint_name=endpoint_name,
+            response = await provider.chat(
+                messages=messages, service=complexity, model=request.model,
+                tools=tools if tools else None, api_key=api_key,
+                session_id=session.session_id,
                 temperature=request.temperature, max_tokens=request.max_tokens,
             )
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Downstream LLM service unavailable: {str(e)}")
+
+        # 开闸：返回 pending（带 context_id），等 ck 闸干预
+        if isinstance(response, dict) and response.get("gate") == "pending":
+            return _gate_pending_response(response, session)
 
         choice = response.get("choices", [{}])[0]
         finish_reason = choice.get("finish_reason", "")
@@ -494,18 +514,19 @@ async def _handle_streaming(request, session, user_text, complexity, logic_categ
         await first_turn_prompt_selection(session, user_text)
 
     messages = context_router.build_messages(session, current_user_content=current_user_content)
-    endpoint_name, model = model_selector.select(complexity, logic_category)
 
     # 将用户消息写入临时历史，保持会话上下文一致性
     session.temp_history.append({"role": "user", "content": current_user_content})
     session.increment_round()
 
+    # _b P5.2：经 sl_llm_provider 流式唯一推理落点
+    provider = get_sl_llm_provider()
     return StreamingResponse(
-        streaming_handler.stream_openai(
+        provider.chat_stream(
             messages=messages,
-            model=model or request.model,
-            api_base=downstream_llm.api_base,
-            api_key=api_key or downstream_llm.default_api_key,
+            service=complexity,
+            model=request.model,
+            api_key=api_key,
         ),
         media_type="text/event-stream",
         headers={"x-synthloop-session-id": session.session_id},
@@ -516,6 +537,32 @@ def _with_session_header(response: JSONResponse, session: Session) -> JSONRespon
     """为 JSONResponse 注入 x-synthloop-session-id Header"""
     response.headers["x-synthloop-session-id"] = session.session_id
     return response
+
+
+def _gate_pending_response(pending: dict, session: Session) -> JSONResponse:
+    """_b P5.2：开闸（ck gate_mode=auto）时主路径返回 pending（带 context_id，等 ck 闸干预）。
+
+    上下文已 park（可经 GET /chatgate/{context_id} peek / POST amend），由外挂改进服务
+    或调用方 peek/amend 后再经 gate_set 出结果——为未来上下文自动化优化留可能。
+    """
+    import time
+    payload = {
+        "id": f"chatcmpl-gate-{pending.get('context_id', '')[:8]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": "gate-pending",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant",
+                        "content": "上下文已提交推理闸（gate=pending），可经 /chatgate/{context_id} 干预后放行。"},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        "gate": "pending",
+        "context_id": pending.get("context_id"),
+        "context": pending.get("context", {}),
+    }
+    return _with_session_header(JSONResponse(content=payload), session)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -801,11 +848,14 @@ async def _handle_fractal_dispatch(request, session, user_text, logic_category,
     )
 
     try:
-        endpoint_name, model = model_selector.select("prompt_chat")
-        response = await downstream_llm.chat(
-            messages=messages, model=model or request.model, api_key=api_key,
-            endpoint_name=endpoint_name, max_tokens=800,
+        # _b P5.2：经 sl_llm_provider 唯一推理落点（service=prompt_chat + 主路径过闸）
+        provider = get_sl_llm_provider()
+        response = await provider.chat(
+            messages=messages, service="prompt_chat", model=request.model,
+            api_key=api_key, session_id=session.session_id, max_tokens=800,
         )
+        if isinstance(response, dict) and response.get("gate") == "pending":
+            return _gate_pending_response(response, session)
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
         level = _classify_by_fractal(content)
         logger.info(f"Fractal: level={level}")

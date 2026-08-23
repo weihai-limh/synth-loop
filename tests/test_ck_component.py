@@ -30,17 +30,17 @@ def mock_source():
 
 
 class _MockProvider(SlLlmProvider):
-    """mock 推理 LLM：记录 routing，返回固定 content"""
+    """mock 推理 LLM：记录 service（routing），返回固定 content"""
     def __init__(self):
         self._selector = None
         self.routings = []
-    async def chat(self, messages, routing=None, model=None, api_key=None, tools=None, **kw):
-        self.routings.append(routing)
+    async def chat(self, messages, service=None, model=None, api_key=None, tools=None, **kw):
+        self.routings.append(service)
         # 断言拼装消息包含 permanent system + current user
         contents = [m.get("content", "") for m in messages]
         assert any("你是相位推理执行器" in c for c in contents)
         assert any("当前相位任务" in c for c in contents)
-        return {"choices": [{"message": {"content": f"<{routing}-result>"}}], "model": "mock"}
+        return {"choices": [{"message": {"content": f"<{service}-result>"}}], "model": "mock"}
 
 
 # ── SlContextSource（ContextSource 适配器）──
@@ -139,3 +139,39 @@ class TestSlContextKernel:
         )
         with pytest.raises(NotImplementedError):
             kernel.infer(ContextPatch(phase_path="0", intent="x", context_id="s"))
+
+
+# ── 主路径过闸（_b P5.2：所有 chat 上下文可被 ck 闸优化）──
+
+class TestMainPathGate:
+    @pytest.mark.asyncio
+    async def test_open_gate_returns_pending(self):
+        """开闸（gate_mode=auto）：sl_llm_provider.chat 返回 pending + context_id（主路径上下文被 ck park）"""
+        from app.services.sl_llm_provider import SlLlmProvider
+        from app.kernels.context_kernel.core.models import GateMode
+
+        provider = SlLlmProvider()
+        # 注入 ck + 开闸
+        kernel = SlContextKernel(
+            context_source=SlContextSource(), data_plane=SlDataPlane(),
+            llm_provider=SlLlmProvider(), primary_model="m", fallback_model="m",
+        )
+        kernel.set_gate_mode("auto")
+        provider.set_ck(kernel)
+        assert kernel.gate_mode == GateMode.AUTO
+
+        resp = await provider.chat([{"role": "user", "content": "你好"}], service="chat")
+        assert resp["gate"] == "pending"
+        assert resp["context_id"]
+        assert "context" in resp
+        # 可经 ck 闸 peek（监听主路径上下文）
+        peeked = kernel.gate_get(resp["context_id"])
+        assert "context" in peeked
+
+    @pytest.mark.asyncio
+    async def test_closed_gate_direct(self):
+        """关闸（closed）：不 park，直接走下游（无 ck 时不抛错，返回 gate 字段缺省）"""
+        provider = SlLlmProvider()  # 无 ck → closed 语义，走 downstream_llm
+        # 无 execution_router 时 downstream_llm.chat 会尝试默认 endpoint，这里仅验证不返回 pending
+        with pytest.raises(Exception):
+            await provider.chat([{"role": "user", "content": "hi"}], service="chat")
