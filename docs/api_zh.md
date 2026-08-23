@@ -1083,7 +1083,7 @@ curl http://localhost:13155/v1/messages \
 
 ### 场景 6：相位多轮推理（v0.1.2）
 
-> 相位由 **XML 标签**显式锁定触发：`<tc-phase>`（结构分形 structural）/ `<tc-phase-chain>`（链式分形 chain）。首轮带标签 → 返回 `synth_pipeline`（待规划确认）；后续轮原样回传 `synth_pipeline: {id, action}` 逐相位推进。
+> 相位由 **XML 标签**显式锁定触发：`<tc-phase>`（结构分形 structural）/ `<tc-phase-chain>`（链式分形 chain）。首轮带标签 → 返回 `synth_pipeline`（待规划确认）；后续轮原样回传 `synth_pipeline: {id, action}` 逐相位推进。相位会话按 `synth_pipeline.id`（pipeline_id）定位内存状态，回传时无需额外 Header。
 
 **第 1 轮（首轮触发，结构分形）**：
 
@@ -1113,7 +1113,7 @@ curl http://localhost:13155/v1/chat/completions \
 }
 ```
 
-**第 2 轮（确认规划 → 启动管道、生成第一个相位 path）**——回传 `synth_pipeline: {id, action}` 即可恢复相位会话（服务端按 `synth_pipeline.id` 定位内存会话，无需额外 Header）：
+**第 2 轮（确认规划 → 启动管道、生成第一个相位 path）**——回传 `synth_pipeline: {id, action}`：
 
 ```bash
 curl http://localhost:13155/v1/chat/completions \
@@ -1125,23 +1125,23 @@ curl http://localhost:13155/v1/chat/completions \
   }'
 ```
 
-**第 2 轮响应**（`awaiting_path_confirm`，路径确认；`artifact_ref` 为 path 产物）：
+**第 2 轮响应**（`awaiting_path_confirm`，路径确认；`artifact_ref` 为 path 产物——`{"id", "name", "steps"}` 信封，`steps` 为相位可执行步骤，可经数据面取回）：
 
 ```json
 {
   "id": "chatcmpl-phase-a1b2c3d4",
   "choices": [{"index": 0, "message": {"role": "assistant",
-    "content": "相位 1/3「市场分析」的 path 如下：\n..."}, "finish_reason": "stop"}],
+    "content": "相位 1/3「市场分析」的 path 如下：\n{\"id\": \"local\", \"name\": \"市场分析\", \"steps\": [{\"action\": \"execute\", \"description\": \"分析目标市场\"}]}\n\n确认执行（confirm）/ 驳回修改（reject + 意见）/ 中止（abort）。"}, "finish_reason": "stop"}],
   "synth_pipeline": {"id": "p1", "step": "awaiting_path_confirm",
     "phase_index": 0, "phase_total": 3, "artifact_ref": "art_p1_path_0"}
 }
 ```
 
-**第 3 轮（确认路径 → 执行当前相位，经推理缝 LLM）**：回传 `{"id": "p1", "action": "confirm"}` → 执行当前相位（normal routing）。执行完成后若该相位 `require_human_approval` → 进入 `awaiting_approval`（回传 confirm 审批通过 / reject 驳回重试）；否则自动推进下一相位（`awaiting_path_confirm`）直至 `step: "completed"`。
+> `artifact_ref: "art_p1_path_0"` 指向 `{"id","name","steps"}` 的 path 信封（`_compile_path` 产物，由执行体组装；真实部署下 `steps` 为 text-cli 指令序列，当前 LocalExecutor 为占位 execute step）。
 
-> 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（子相位直接出 path，钳制深度）。执行经推理缝 LLM（非 text-cli）；相位上下文可被 ck 闸监听/优化（开闸时）。
+**第 3 轮（确认 path → 执行当前相位）**：回传 `{"id": "p1", "action": "confirm"}` → `_confirm` 命中 `awaiting_path_confirm` → `_execute_phase` 执行当前相位。执行走推理缝（SlInferenceSeam → normal routing → sl_llm_provider）。执行完成后若该相位 `require_human_approval` → 进入 `awaiting_approval`（回传 confirm 审批通过 / reject 驳回重试）；否则自动推进下一相位（`awaiting_path_confirm`）直至 `step: "completed"`。
 
-> 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（子相位直接出 path，钳制深度）。执行经推理缝 LLM（非 text-cli）；相位上下文可被 ck 闸监听/优化（开闸时）。
+> 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（根相位分形出多相位、子相位直接出 path，钳制深度）。执行经推理缝 LLM；相位上下文可被 ck 闸监听/优化（开闸时）。
 
 ---
 
