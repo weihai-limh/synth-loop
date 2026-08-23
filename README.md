@@ -1,6 +1,6 @@
 # synth-loop
 
-> LLM orchestration engine — classify, route, inject, and execute. One request, one intelligent path. / LLM 编排引擎——分类、路由、注入、执行。一次请求，一条智能路径。
+> An intelligent switching hub exposed as an LLM gateway — classify, route, inject, and execute. One request, one intelligent path. / 以 LLM 网关形态暴露的智能交换中枢——分类、路由、注入、执行。一次请求，一条智能路径。
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -33,8 +33,11 @@ curl -s http://localhost:13155/v1/chat/completions \
 | Capability / 能力 | How / 原理 |
 |------|------|
 | **Fractal routing / 分形决策** | Classifies request complexity. Simple queries skip strategy matching. / 按请求复杂度选择最经济的执行路径 |
+| **Context kernel / 上下文内核** | ck assembles context + gate listens every inference; all chat context optimizable / ck 统一拼装上下文 + 闸监听每次推理，所有 chat 上下文可被优化 |
+| **Phase reasoning / 相位推理** | pk decomposes complex tasks into multi-phase steps with gates / pk 将复杂任务拆为多步相位 + 闸审查 |
 | **Strategy injection / 策略注入** | Auto-matches expert prompts + skill shards + tool definitions per intent / 按意图自动匹配专家 Prompt + 技能分片 + 工具 |
 | **Task chain execution / 任务链推进** | Decomposes "analyze then report" into plan → execute → verify → summarize / 复杂任务自动拆解为多步执行链 |
+| **Unified gate / 统一闸** | gate_manager orchestrates ck/pk gates across kernel loop / gate_manager 跨内核编排 ck/pk 闸 |
 | **Dual-protocol streaming / 双协议流式** | OpenAI + Anthropic SSE, one codebase / 一个入口同时兼容两套协议 |
 
 > **Dependency / 前置依赖**：Full experience needs strata-match at `localhost:13156`. Degrades gracefully with built-in defaults. / 完整体验需要外部策略服务，可降级使用内置默认策略独立运行。

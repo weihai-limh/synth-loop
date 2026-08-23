@@ -2,7 +2,7 @@
 
 > **版本标记**：当前文档内容基于 `v0.1.1` 验收完成的场景进行表述。当前阶段：`0.1.1 → 0.1.2`。
 
-**LLM 编排引擎**——分类、路由、注入、执行。一次请求，一条智能路径。
+**以 LLM 网关形态暴露的智能交换中枢**——分类、路由、注入、执行。一次请求，一条智能路径。
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -25,17 +25,20 @@ curl -s http://localhost:13155/v1/chat/completions \
 
 ## 一、它是什么
 
-synth-loop 是一个 **LLM 编排引擎**。它对外暴露 OpenAI/Anthropic 兼容端点，但内部不做透传——它在每次请求中做分类、路由、策略注入和任务拆解。
+synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**。它对外暴露 OpenAI/Anthropic 兼容端点，但内部**不是中立网关、也不是单纯的编排引擎**——它是各方的交汇点：每次请求进来，被智能地"交换"到对的路径、对的内核、对的模型，最终收束到唯一推理落点。
 
 ```
-你的应用 ──OpenAI/Anthropic──→ synth-loop（编排层）
+你的应用 ──OpenAI/Anthropic──→ synth-loop（智能交换中枢）
                                   ├── 复杂度分类（规则 + LLM 双层判定）
                                   ├── 分形路由（6 级 a-f 路径选择）
-                                  ├── 管道编排（v0.1.2：PipelineSession + 相位推进 + 三闸审查）
+                                  ├── 上下文内核（ck：拼装 + 闸监听，上下文可被优化）
+                                  ├── 相位推理（pk：复杂任务拆为多步相位 + 闸审查）
                                   ├── 策略注入（专家 Prompt + 技能 + 工具）
                                   ├── 任务链推进（拆解→执行→验证→汇总）
                                   └── SSE 流式（OpenAI + Anthropic）
 ```
+
+> **一句话本质**：它不是透传的网关——它在请求与模型之间**做智能决策**（走哪条路、装什么上下文、过什么闸、用哪个模型、怎么多步推理），并把所有推理收敛到唯一落点。OpenAI/Anthropic 兼容端点只是它对外的一张"脸"，不是它的身份。
 
 > **前置依赖**：完整体验需要策略服务运行在 `localhost:13156`。synth-loop 可降级独立运行（使用内置默认策略 + 内置工具）。
 
@@ -216,7 +219,7 @@ synth-loop/
 |------|-----------|---------------|
 | [text-cli](https://github.com/weihai-limh/text-cli) | 分布式指令执行——`AI:域;动作` 协议，10 个工具包随运行时附带，A0-A9 渐进式部署 | 执行引擎——计划编译器输出 path JSON → `--async` 异步委托 |
 | [strata-match](https://github.com/weihai-limh/strata-match) | 策略供应——`POST /api/v1/query` 返回 Prompt+技能+工具，相位驱动动态策略生成（v0.1.2） | 策略供应——每相位动态匹配最优 Prompt + 技能分片 |
-| synth-loop | LLM 编排——OpenAI/Anthropic 兼容端点，分形路由+任务链+多相位管道（v0.1.2） | 管道大脑——PipelineSession + 计划编译器 + 三闸推进 |
+| synth-loop | 智能交换中枢——以 LLM 网关形态暴露，分形路由+上下文内核+多相位推理+统一闸（v0.1.2） | 管道大脑——上下文内核 + 相位推理 + 统一闸编排 |
 | [drive-magic](https://github.com/weihai-limh/drive-magic) | 融合镜像——一条 docker 命令拉起全栈，Web 管理面+六媒介触达，Chrome 插件管道仪表盘（v0.1.1） | 管道界面——相位进度条、路径编辑器、制品预览 |
 
 ---
