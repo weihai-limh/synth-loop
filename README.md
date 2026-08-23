@@ -28,6 +28,14 @@ curl -s http://localhost:13155/v1/chat/completions \
 
 ---
 
+## What it is / 它是什么
+
+An intelligent switching hub exposed as an LLM gateway — **externally an LLM gateway face** (OpenAI/Anthropic-compatible), **internally a smart dispatch & converge hub**: every request, it decides **which path, which context, which gate, which model, how to reason multi-step**, then converges all inference to a single inference point. Not a transparent gateway, not a plain orchestration engine.
+
+对外是一张 LLM 网关的"脸"（OpenAI/Anthropic 兼容端点），对内是一个做智能分派与收束的交换中枢——每次请求替你做整套决策：**走哪条路径、装什么上下文、过什么闸、用哪个模型、怎么多步推理**，最终把所有这些推理**收束到唯一推理落点**。它不是透传的网关，也不是单纯的编排引擎。
+
+---
+
 ## What it does / 核心能力
 
 | Capability / 能力 | How / 原理 |
