@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
-"""sl ↔ ck/pk 内核适配层（_b P4，组件形态）
+"""sl ↔ ck/pk 内核适配层（_b P4→P5，组件形态）
 
-职责（DESIGN §七 Phase 4 任务 4.2 / 4.4）：
+职责（DESIGN §七 Phase 4 任务 4.2 / 4.4 + Phase 5 任务 5.3）：
 - 为 vendored ck 提供三端口适配器（ContextSource / DataPlane / LlmProvider）
-- 为 pk 提供四缝填缝（推理缝经 SlContextKernel.infer）
-- SlContextKernel(ContextKernel) 覆写 infer（pk 填缝方）——**不改 vendored ck 源码**（纯副本原则）
+- SlContextKernel 作 ck 组件实例（**不改 vendored ck 源码**，纯副本原则）
+- 为 pk 提供四缝填缝：推理缝归 `SlInferenceSeam`（services/inference_seam.py，
+  暴露到 build_messages）；装配 `PhaseReasoningEngine`（build_phase_engine，P5.3 整体替换）
+- gate_manager 的 ck/pk 端口适配（_CkGateAdapter / _PkGateAdapter）
 
-Phase 4 目标 = "适配层可装配 + ck infer 填缝验证"，用同步 mock 验证链路；
-真实 sl Session（ContextSource 写面）/ 真实 downstream_llm（async 桥接）在 Phase 5 接入。
+P4：SlContextKernel 曾覆写 infer（同步 mock 验证）；P5 语义收敛——推理缝归
+SlInferenceSeam（async，经 build_messages 收束 + ck 闸监听），SlContextKernel
+不再覆写 infer（防腐败）。
 
-同步/异步鸿沟说明：ck 内核为同步（`_assemble_and_gate` 同步调 `llm_provider.chat`），
-sl `DownstreamLLM` 为 async。P4 先以同步 mock 验证 infer 链路；async 桥接
-（awaitable 包装 / 事件循环）在 Phase 5 处理。
+同步/异步鸿沟化解：推理缝暴露到 sl build_messages（async），经 ck build_prompt
+纯函数（sync 拼装）+ sl_llm_provider（async 推理），不再依赖 ck sync 直推链路。
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import logging
 from typing import Any, Optional
 
 from .gate_manager import inject_kernels
+from .inference_seam import SlInferenceSeam
 
 # ── vendored ck ──
 from ..kernels.context_kernel import ContextKernel, ContextPatch
@@ -27,6 +30,12 @@ from ..kernels.context_kernel.core.models import (
     GateMode, InferenceResult, SessionView,
 )
 from ..kernels.context_kernel.ports import ContextSource, DataPlane, LlmProvider
+
+# ── vendored pk ──
+from ..kernels.phase_kernel import (
+    PhaseReasoningEngine,
+    MechanicalPlanner, LocalExecutor, InMemoryArtifactStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,35 +128,17 @@ class SlLlmProvider:
 
 
 # ═══════════════════════════════════════════════════════════
-# SlContextKernel：覆写 infer（pk 填缝方）——不改 vendored ck
+# SlContextKernel：ck 组件实例（P5 语义收敛——推理缝归 SlInferenceSeam）
 # ═══════════════════════════════════════════════════════════
 
 class SlContextKernel(ContextKernel):
-    """组件形态 pk 填缝：在 sl 层覆写 ContextKernel.infer。
+    """sl 侧 ck 组件实例（作为 gate_manager / 适配器用的 ck 内核）。
 
-    vendored ck 基类 `infer` 保持 NotImplementedError（纯副本原则）；
-    本子类在 sl 层实现 pk 推理缝契约。
+    P5 语义收敛（防腐败）：推理缝（pk 填缝）归 `SlInferenceSeam`（services/inference_seam.py），
+    **不再**在 SlContextKernel 覆写 infer——基类 `infer` 保持 NotImplementedError
+    （vendored ck 纯副本原则）。SlContextKernel 仅作 ck 组件实例供 `_CkGateAdapter`
+    / build_messages 取会话快照用。
     """
-
-    def infer(self, context_patch: Any) -> Any:
-        patch = context_patch
-        ext = getattr(patch, "ext", None) or {}
-        routing = ext.get("routing")
-        intent = getattr(patch, "intent", None)
-        context_id = getattr(patch, "context_id", None)
-        session_id = context_id or ""
-
-        session_view = self.context_source.read_session(session_id)
-        return self._assemble_and_gate(
-            session_view=session_view,
-            current_user_content=intent,
-            session_id=session_id,
-            routing=routing,
-            ext=ext,
-            gate_mode=GateMode.CLOSED,  # pk 填缝需 content 回填 → closed 直推
-            model=None,
-            stream=False,
-        )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -217,3 +208,39 @@ class _PkGateAdapter:
     def evaluate_quality(self, session: Any, phase: Any,
                          execution_passed: bool, detail: str) -> Any:
         return {"passed": execution_passed, "detail": detail}
+
+
+# ═══════════════════════════════════════════════════════════
+# P5.3 装配：pk PhaseReasoningEngine（四缝 + 推理缝=SlInferenceSeam）
+# ═══════════════════════════════════════════════════════════
+
+def build_phase_engine(
+    context_source: Any,
+    gate_manager: Optional[Any] = None,
+    sl_llm_provider: Optional[Any] = None,
+    max_phase_depth: int = 4,
+    degraded_mode: bool = False,
+) -> PhaseReasoningEngine:
+    """装配 pk `PhaseReasoningEngine`（整体替换 sl 相位自持实现，P5.3）。
+
+    四缝填缝：
+    - planner：`MechanicalPlanner`（零 LLM 兜底；推理缝注入时 pk 优先走 seam 规划）
+    - executor：`LocalExecutor`（进程内执行，mock 兼容；Phase 5 阶段）
+    - inference_seam：`SlInferenceSeam`（推理缝暴露到 build_messages，经 ck 闸监听）
+    - artifact_store：`InMemoryArtifactStore`（数据面）
+    - store/gate：缺省（内存 _sessions + MechanicalGate）
+    """
+    seam = SlInferenceSeam(
+        context_source=context_source,
+        llm_provider=sl_llm_provider,
+        gate_manager=gate_manager,
+    )
+    engine = PhaseReasoningEngine(
+        executor=LocalExecutor(),
+        planner=MechanicalPlanner(),
+        artifact_store=InMemoryArtifactStore(),
+        inference_seam=seam,
+        degraded_mode=degraded_mode,
+        max_phase_depth=max_phase_depth,
+    )
+    return engine

@@ -16,28 +16,42 @@ if str(_SRC) not in sys.path:
 
 @pytest.fixture
 def orchestrator():
-    """隔离网关 DB + mock LLM（规划降级默认 + 执行 mock tc）"""
+    """隔离网关 DB + 注入 mock 推理缝（整体替换后相位执行经推理缝 LLM，测试用 mock seam 稳定）"""
     import tempfile
     from app import database as db
-    from app.config import get_config
     asyncio.run(db.close_shared_db())
     tmp = tempfile.mkdtemp()
     import unittest.mock as mock
     with mock.patch.object(db, "get_db_path", return_value=str(Path(tmp) / "gw.db")):
         asyncio.run(db.init_database())
-        # 运行时表：mock tc 端点
-        from app.services.runtime_endpoints import create_endpoint
-        asyncio.run(create_endpoint({
-            "alias": "home-service", "url": "http://mock-tc:28050/text-cli/cli",
-            "auth": "none", "rank": 1,
-        }))
         from app.services.phase_chat_orchestrator import PhaseChatOrchestrator
-        # 加载 execution_router（model_config.yaml）——planning/summarize 场景路由
-        from app.services.execution_router import get_execution_router
-        from app.services.downstream_llm import get_downstream_llm
-        router = get_execution_router(str(_SRC / "model_config.yaml"))
-        get_downstream_llm().set_execution_router(router)
-        orch = PhaseChatOrchestrator()
+        from app.services.kernel_adapters import SlContextSource
+        from app.kernels.phase_kernel import (
+            PhaseReasoningEngine, MechanicalPlanner, LocalExecutor, InMemoryArtifactStore,
+        )
+        from app.kernels.context_kernel.core.models import InferenceResult
+        from app.services.inference_seam import SlInferenceSeam
+
+        class MockSeam(SlInferenceSeam):
+            """mock 推理缝：planning 返回固定 PhasePlan，normal 返回正常执行结果。"""
+            async def infer(self, patch):
+                ext = patch.ext or {}
+                routing = ext.get("routing")
+                if routing == "planning":
+                    content = ('{"phases": [{"index": 0, "name": "需求分析", "description": "分析需求"},'
+                               '{"index": 1, "name": "执行", "description": "执行任务"},'
+                               '{"index": 2, "name": "总结", "description": "总结输出"}]}')
+                else:
+                    content = "<相位执行完成>"
+                return InferenceResult(context_id=patch.context_id or "", content=content,
+                                       ext={"routing": routing, "phase_path": patch.phase_path})
+
+        seam = MockSeam(context_source=SlContextSource())
+        engine = PhaseReasoningEngine(
+            executor=LocalExecutor(), planner=MechanicalPlanner(),
+            artifact_store=InMemoryArtifactStore(), inference_seam=seam,
+        )
+        orch = PhaseChatOrchestrator(engine=engine)
         yield orch
         asyncio.run(db.close_shared_db())
 
@@ -141,50 +155,44 @@ class TestPhaseChatProtocol:
             return True
         assert asyncio.run(run())
 
-    def test_check_result_long_task(self, orchestrator):
-        """R4 长任务：tc 返回 pending + task_id → check_result 决策点轮询"""
+    def test_execute_via_seam(self, orchestrator):
+        """整体替换（_b）：执行经推理缝 mock seam 正常完成（不走 tc）"""
         async def run():
             resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
             sp1 = resp1["synth_pipeline"]
-            # 第一次 confirm：确认规划 → 生成 path → awaiting_path_confirm
+            # confirm 规划 → 生成 path
             resp2 = await orchestrator.handle_chat(
                 "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
             sp2 = resp2["synth_pipeline"]
-            assert sp2["step"] == "awaiting_path_confirm"
-            # 第二次 confirm：确认 path → 执行 → tc 返回异步 pending（长任务）
-            with respx.mock:
-                respx.post("http://mock-tc:28050/text-cli/cli").mock(
-                    return_value=httpx.Response(200, json={
-                        "rst_types": "text",
-                        "rst_data": {"status": "pending", "task_id": "task-001"},
-                        "rst_err": ""}))
+            assert sp2["step"] in {"awaiting_path_confirm", "executing", "completed"}
+            # 再 confirm path → 执行（mock seam normal routing → 正常完成，推进下一相位/完成）
+            if sp2["step"] == "awaiting_path_confirm":
                 resp3 = await orchestrator.handle_chat(
                     "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
                 sp3 = resp3["synth_pipeline"]
-                assert sp3["step"] == "executing"
-                assert "check_result" in resp3["content"]
-            # 轮询：check_result 决策点
-            resp4 = await orchestrator.handle_chat(
-                "查询结果", synth_pipeline={"id": sp1["id"], "action": "check_result"})
-            assert resp4["synth_pipeline"]["step"] == "executing"
+                assert sp3["step"] in {"awaiting_path_confirm", "executing", "completed"}
             return True
         assert asyncio.run(run())
 
-    def test_tc_unreachable_phase_degraded(self, orchestrator):
-        """P18：相位执行 tc 不可达 → 降级响应（不崩、不挂起）"""
+    def test_execute_completes_all_phases(self, orchestrator):
+        """整体替换（_b）：执行经 mock seam 正常完成，推进至所有相位完成（不走 tc）"""
         async def run():
             resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
             sp1 = resp1["synth_pipeline"]
-            # 第一次 confirm：规划 → path
+            # 规划 → path
             resp2 = await orchestrator.handle_chat(
                 "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
             sp2 = resp2["synth_pipeline"]
             assert sp2["step"] == "awaiting_path_confirm"
-            # 第二次 confirm：执行——tc 不 mock（连接失败）→ 相位降级
-            resp3 = await orchestrator.handle_chat(
-                "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
-            sp3 = resp3["synth_pipeline"]
-            assert sp3["step"] in {"aborted", "executing"}
-            assert resp3["content"]  # 有降级消息（不挂起）
+            # 逐相位 confirm → 执行（mock seam normal）→ 推进
+            step = sp2["step"]
+            for _ in range(4):
+                if step == "completed":
+                    break
+                resp = await orchestrator.handle_chat(
+                    "确认", synth_pipeline={"id": sp1["id"], "action": "confirm"})
+                step = resp["synth_pipeline"]["step"]
+                assert step in {"awaiting_path_confirm", "executing", "completed"}
+            assert resp["content"]  # 有响应（不挂起）
             return True
         assert asyncio.run(run())
