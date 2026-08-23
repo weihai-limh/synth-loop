@@ -50,6 +50,12 @@ An intelligent switching hub exposed as an LLM gateway — **externally an LLM g
 
 > **Dependency / 前置依赖**：Full experience needs strata-match at `localhost:13156`. Degrades gracefully with built-in defaults. / 完整体验需要外部策略服务，可降级使用内置默认策略独立运行。
 
+## How it works / 它怎么工作
+
+Fractal routing picks **one path** per request — simple chat → direct chat/prompt_chat (strategy injection); complex task → task_chain / phase reasoning (pk). Then context kernel (ck) assembles context + gate listens; unified gate (gate_manager) orchestrates ck/pk gates across the kernel loop; all inference converges to one inference point (`sl_llm_provider`).
+
+分形路由为每次请求**选一条路径**——简单对话 → chat/prompt_chat（策略注入）；复杂任务 → task_chain / 相位推理（pk 分形相位树）。随后上下文内核（ck）拼装 + 闸监听，统一闸（gate_manager）跨内核编排，所有推理收束到唯一推理落点（`sl_llm_provider`）。相位执行经推理缝 LLM（非 text-cli）。
+
 ---
 
 ## Dev status / 开发状态
@@ -58,9 +64,8 @@ An intelligent switching hub exposed as an LLM gateway — **externally an LLM g
 |------|---------|:----:|
 | v0.1 | 112/112 static tests PASS | ✅ |
 | v0.1.1 | 189 static tests PASS, 9 dynamic scripts ready | ✅ |
+| v0.1.2 | phase reasoning (pk) + context kernel (ck) + unified gate + 3 preconditions + main path through gate | ✅ (_b done, 104 tests pass) |
 
-
-**Honesty / 诚实地说**：Solo project (bus factor=1), zero external users, all benchmarks are internal. / 单人项目（bus factor=1），零外部用户，所有性能数据来自内部基准测试。
 
 ---
 

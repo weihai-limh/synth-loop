@@ -11,21 +11,21 @@
 
 ## 一、核心定位
 
-synth-loop 是一个 **LLM 编排引擎**——对每次请求做分类、路由、策略注入、任务拆解和上下文累积。它对外暴露 OpenAI/Anthropic 兼容端点以消除接入摩擦，但内部行为不是透传——是编排。
+synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**（_b 定位）——对外是一张 LLM 网关的"脸"（OpenAI/Anthropic 兼容端点），对内是一个做智能分派与收束的交换中枢：对每次请求做整套决策（走哪条路径、装什么上下文、过什么闸、用哪个模型、怎么多步推理），最终把所有这些推理收束到唯一推理落点（`sl_llm_provider`）。
 
 ```
 API 代理：请求 → 转发 → 响应（不改语义）
-synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → 任务链/直答 → LLM → 流式返回
+synth-loop：请求 → 复杂度分类 → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 相位/任务链推理 → 唯一推理落点 → 流式返回
 ```
 
 ### 是什么 / 不是什么
 
 | 是 | 不是 |
 |------|------|
-| 编排引擎——分类、路由、注入、拆解、执行（`src/app/services/execution_router.py`） | 匹配引擎（策略匹配由外部策略服务负责） |
-| 协议兼容端点——OpenAI + Anthropic 双协议接入（`src/app/services/protocol_translator.py`） | API 代理——不做请求透传，每个请求都经历编排管线 |
-| 上下文累积与注入——XML 标签体系 + 永久区管理（`src/app/services/context_injector.py`） | LLM 框架（不封装 LLM 调用） |
-| 编排决策者——路由选择、工具调度、任务推进 | 策略持有者（策略由外部策略服务管理） |
+| 智能交换中枢——分派 + 收束（`src/app/services/sl_llm_provider.py` 唯一推理落点） | 匹配引擎（策略匹配由外部策略服务负责） |
+| 协议兼容端点——OpenAI + Anthropic 双协议接入（`src/app/services/protocol_translator.py`） | API 代理/中立网关——不做请求透传，每个请求都经历编排决策 |
+| 上下文内核承接方——ck 六层拼装 + 闸监听（`src/app/kernels/context_kernel/`） | LLM 框架（不封装 LLM 调用） |
+| 编排决策者——分形路由、相位推理（pk）、统一闸编排 | 策略持有者（策略由外部策略服务管理） |
 
 ---
 
@@ -80,7 +80,7 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 
 | 能力 | 实现 | 说明 |
 |------|------|------|
-| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions`（v0.1.2_a 含相位路由） |
+| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions`（_b 主路径归并 sl_llm_provider + 过 ck 闸） |
 | Anthropic 入口 | `anthropic_chat.py` — 请求翻译 + dispatch | `/v1/messages` |
 | 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`（v0.1.1 新增） |
 | 健康检查 | `health.py` | `/health` |
@@ -88,6 +88,7 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | 运行时表管理 API | `runtime_endpoints.py` — CRUD（v0.1.2_a） | `/api/v1/runtime-endpoints`（admin scope） |
 | 制品数据面 | `artifacts.py` — 相位产物查询（v0.1.2_a） | `/api/v1/artifacts/{id}`、`?pipeline_id=` |
 | 管道管理 API | `pipeline.py` — 9 端点（v0.1.2，`pipelines_api.enabled` 默认 false） | `/api/v1/pipelines` |
+| 统一闸钩子面 | `gate.py` — gate_manager 配置（_b 新增） | `/gate-manager/config` GET/PATCH |
 | 管理面板 | `admin.py` — HTML 页面路由 | `/admin/sessions` 等 |
 
 ### 3.2 编排服务层（`src/app/services/`）
@@ -108,7 +109,11 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | 工具分发器 | `tool_dispatcher.py` | 注册 + 路由工具调用 |
 | 动态工具执行 | `dynamic_tool_executor.py` | 运行时工具执行（v0.1.2_a：走强化客户端，无 `command.replace`） |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
-| 模型选择器 | `model_selector.py` | 按复杂度选模型（v0.1.2_a：6 场景含 planning/summarize） |
+| 模型选择器 | `model_selector.py` | 直接透传 service 给 execution_router（_b：llm_routing 配置唯一真源，无 service_map 白名单截断） |
+| 唯一推理落点 | `sl_llm_provider.py` | _b 新增——所有路径（主/相位/工具）收敛；通用 service 选择 + ck 闸集成 + context_id 生成 |
+| 推理缝 | `inference_seam.py` | _b 新增——`SlInferenceSeam`：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸监听 |
+| 统一闸 | `gate_manager.py` | _b 新增——跨内核闸编排：GateType 五类 + 组合函数注册表 + 跨内核循环 + ck/pk 端口适配 |
+| 内核适配层 | `kernel_adapters.py` | _b 新增——sl 侧 ck 组件（SlContextKernel/适配器）+ pk 装配（build_phase_engine） |
 | 逻辑抽象器 | `logic_abstractor.py` | 关键词判定 subtype |
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
@@ -117,8 +122,10 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
 | 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0.1.1 新增） |
 | 运行时表 | `runtime_endpoints.py` | tc 端点配置面（v0.1.2_a）：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
 | 强化客户端 | `textcli_enhanced_client.py` | tc 执行面（v0.1.2_a）：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
-| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约（v0.1.2_a）：synth_pipeline 状态机 + 决策点 + 长任务 check_result |
-| 制品数据面 | `artifact_dataplane.py` | 相位产物落库（v0.1.2_a）：artifacts 表 + TTL 24h |
+| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约（_b 整体替换）：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配），sl 自持状态机退役 |
+| 相位内核 | `kernels/phase_kernel/` | _b vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填） |
+| 上下文内核 | `kernels/context_kernel/` | _b vendored——ck 组件：六层拼装 + 推理闸 + gate_mode（纯副本，sl 适配层封装） |
+| 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配） |
 | token 服务 | `token_service.py` | 统一 token（v0.1.2_a）：issue_token/verify_token/map_user_id |
 
 ### 3.3 工具层（`src/app/tools/`）
@@ -152,8 +159,8 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
   ├── 消息前置检查层
   │     ├── Task-(.+)-synthloop 匹配 → 查 tasks 表 → 终点响应
   │     ├── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
-  │     └── [v0.1.2_a] 相位路由：带 synth_pipeline 字段 → 解析 action → 相位编排
-  │           （相位意图识别规则优先 + 保守阈值；普通请求永不自动进相位）
+  │     └── [_b] 相位路由：带 synth_pipeline 字段 → 解析 action → pk 相位推理（薄壳委托）
+  │           （相位意图识别规则优先 + 保守阈值，返回模式档 structural/chain；普通请求永不自动进相位）
   │    代码: src/app/routers/chat.py chat_completions()
   │
   ├── 复杂度分类
@@ -161,17 +168,17 @@ synth-loop：请求 → 复杂度分类 → 分形路由 → 策略注入 → �
   │     └── 层2: 分形 Prompt（1 次 LLM 调用）
   │    代码: src/app/services/complexity_classifier.py
   │
-  ├── 分形路由
+  ├── 分形路由（选一条路径）
   │     ├── a/chat → 直答
-  │     ├── b/prompt_chat → strata-match 策略查询 → 注入 → LLM
+  │     ├── b/prompt_chat → strata-match 策略查询 → 注入
   │     ├── c/task → strata-match 工具注入 → LLM 工具调用循环
-  │     │     └── [v0.1.2_a] 执行走强化客户端（alias 路由 → 运行时表 → tc）
-  │     └── e,f/task_chain → 任务链拆解执行
+  │     └── e,f/task_chain / 相位 → 任务链 / pk 相位推理
   │    代码: src/app/routers/chat.py chat_completions() dispatch 决策链
   │
-  ├── 下游 LLM 调用
-  │     └── [v0.1.2_a] chat_with_degradation：503 切同池模型 / 502/504 切端点
-  │    代码: src/app/services/downstream_llm.py
+  ├── [_b] 主路径归并：所有分支经 build_messages 收束 → sl_llm_provider（唯一推理落点）
+  │     ├── 上下文经 ck 拼装 + 闸监听（gate_mode=auto 时 park 返回 pending，可 peek/amend）
+  │     └── 模型经 llm_routing 多场景配置（service 透传，无白名单截断）
+  │    代码: src/app/services/sl_llm_provider.py + kernels/context_kernel/
   │
   └── SSE 流式响应
        代码: src/app/services/streaming_handler.py
@@ -307,8 +314,8 @@ src/
 | `async_tasks` | `config.yaml` | enabled=false, max_per_user=3 | `routers/chat.py` |
 | `packets` | `config.yaml` | enabled=true, ttl_seconds=1800 | `packet_store.py`（v0.1.1） |
 | `endpoints` | `model_config.yaml` | 端点池定义 | `execution_router.py` |
-| `llm_routing` | `model_config.yaml` | 路由映射（v0.1.2_a：6 场景含 planning/summarize） | `execution_router.py` |
-| `llm_gateway` | `model_config.yaml` | enabled=false, gateways（v0.1.2_a 多网关注册表） | `downstream_llm.py` |
+| `llm_routing` | `model_config.yaml` | 路由映射（_b：多场景唯一真源，任意 service 透传无白名单截断） | `execution_router.py` → `model_selector.py` → `sl_llm_provider.py` |
+| `llm_gateway` | `model_config.yaml` | enabled=false, gateways（多网关注册表，默认未启用） | `downstream_llm.py` |
 | `rules` | `complexity_rules.yaml` | chat/task_chain 规则 | `complexity_classifier.py` |
 
 ### 7.3 持久化
@@ -400,6 +407,7 @@ src/
 | v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
 | v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道大脑 |
 | v0.1.2_a | tc 消费链路收敛（运行时表 + 强化客户端 + textcli_client 废弃）+ LLM 层（6 场景 + 降级）+ 相位 chat 契约（synth_pipeline 多轮）+ 统一 token；72 测试全绿 | 纠偏版本（不升版本号） |
+| v0.1.2_b | vendored 集成 ck/pk + 三前置（问题分形链式/模型三档/统一闸 gate_manager）+ 整体替换（pk 相位引擎）+ 推理收束（sl_llm_provider 唯一落点）+ 主路径过闸 + model_selector 多场景透传；104 测试全绿 | 代码集成补强（不升版本号）——智能交换中枢 |
 | v0.2（规划） | 质量反馈分析 + 路由准确率可观测 | 闭环版本——骨架填肉 |
 
 ---
@@ -413,8 +421,10 @@ src/
 | `_check_cancelled()` 使用 aiosqlite 同步查询 | 高频场景有性能隐患 | 骨架阶段简化实现 |
 | `FRACTAL_SYSTEM_PROMPT` 硬编码在 `chat.py` | prompt 改动需改代码 | 未配置化 |
 | DB 访问模式不一致（本地 import vs 全局） | 可维护性问题 | 历史遗留 |
-| 相位执行为"简化执行"（v0.1.2_a） | `_execute_phase` 提交空 steps path；`_check_result` 返回"仍在执行中" | mock 环境裁剪，真实 LLM→path→tc 链路待真实联调验证 |
-| 相位 LLM 决策路径未被测试（v0.1.2_a） | 测试走降级默认规划，规划质量未验证 | 测试环境 mock LLM |
+| 相位执行为"简化执行"（v0.1.2_a） | 已解决（_b 整体替换）：执行经推理缝 LLM（pk SlInferenceSeam），非 tc | — |
+| 相位 LLM 决策路径未被测试（v0.1.2_a） | 已解决（_b）：相位测试注入 mock 推理缝，规划/执行路径被验证 | — |
+| `task_chain` 分支未归并 sl_llm_provider（_b） | task_chain_executor 内部仍直接调 downstream_llm，未收敛唯一推理落点 | 内部实现较复杂，留后续完整归并 |
+| `logic_category` 未接入模型选择（_b） | 细分类型维度未用于模型选择 | 预留签名，未来精细化维度 |
 
 ### 代码债表
 

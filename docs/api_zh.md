@@ -17,6 +17,7 @@
   - [消息创建（Anthropic 格式）](#消息创建anthropic-格式)
   - [SSE 流式响应](#sse-流式响应)
   - [健康检查](#健康检查)
+  - [统一闸管理（v0.1.2_b）](#统一闸管理v012_b)
 - [内置工具](#内置工具)
 - [完整场景示例](#完整场景示例)
 - [内部接口参考](#内部接口参考)
@@ -49,14 +50,15 @@ synth-loop 提供与 OpenAI 和 Anthropic 完全兼容的 API，客户端只需�
 
 **分形决策**：
 
-synth-loop 采用**分形 Prompt** 分级决策，按请求复杂度自动选择最经济的路径（v0_1_1: 6 级 a-f）：
+synth-loop 采用**分形 Prompt** 分级决策，为每次请求**选一条最经济的路径**（v0_1_1: 6 级 a-f + _b 相位/链式）：
 
 ```
 请求 → 规则匹配（免费，<1ms，仅覆盖两端极值）
   ├── "你好"/"hello" → chat（直答，零开销，~235 token）
-  └── "先.*再"/"分析并.*生成" → task_chain（任务链推进）
+  ├── "先.*再"/"分析并.*生成" → task_chain（任务链推进）
+  └── "用相位"/"用链" → 相位推理（pk 分形相位树，_b）
 
-规则未命中 → 分形Prompt（1次LLM调用，单字母输出）
+规则未命中 → 分形Prompt（1次LLM调用，单字母输出）→ 选一条：
   ├── a → chat（直答）
   ├── b → prompt_chat（调 strata-match）
   ├── c → task（单次外部工具调用）
@@ -64,6 +66,8 @@ synth-loop 采用**分形 Prompt** 分级决策，按请求复杂度自动选择
   ├── e → task_chain（异步分支，多步骤任务链）
   └── f → sync_task_chain（同步任务链）
 ```
+
+选定路径后，上下文经 ck 内核拼装 + 闸监听，推理经 `sl_llm_provider` 唯一落点（_b：所有路径收敛，开闸时可被 ck 闸干预）。
 
 ### 会话管理（x-synthloop-session-id）
 
@@ -238,7 +242,7 @@ POST /v1/chat/completions
 | stream | boolean | 否 | 是否流式返回 |
 | packets | string[] | 否 | **v0_1_1 新增**：已提交到 `/v1/packets` 的 packet ID 列表 |
 | inline_data | object[] | 否 | **v0_1_1 新增**：降级模式下原始数据直接内联，无需先提交 |
-| synth_pipeline | object | 否 | **v0.1.2_a 新增**：相位状态字段 `{id, action}`——显式驱动相位多轮推进（confirm/reject/regenerate/regenerate_with_new_context/abort/check_result）；响应中携带 `{id, step, phase_index, phase_total, artifact_ref}`，调用方原样回传以继续 |
+| synth_pipeline | object | 否 | **v0.1.2_a 新增**：相位状态字段 `{id, action}`——显式驱动相位多轮推进（confirm/reject/regenerate/regenerate_with_new_context/abort/check_result）；响应中携带 `{id, step, phase_index, phase_total, artifact_ref}`，调用方原样回传以继续。相位触发词：`用相位`/`用管道`（结构分形 structural，复杂任务）、`用链`/`链式`（链分形 chain，中等任务）；未命中规则绝不自动进相位（保守阈值） |
 
 #### messages 数组
 
@@ -327,6 +331,24 @@ POST /v1/chat/completions
 ```
 
 synth-loop 会自动执行工具调用，将结果注入推理循环，最终返回文本响应。
+
+#### 开闸响应（gate: pending，v0.1.2_b）
+
+当 `gate_manager` 开启 ck 推理闸（`meta_gate: on/auto`）时，请求上下文会被 ck park——响应不直接出结果，而是返回待闸状态（供外挂服务/调用方 peek/amend 干预后放行，为上下文自动化优化留可能）：
+
+```json
+{
+  "id": "chatcmpl-gate-a1b2c3d4",
+  "object": "chat.completion",
+  "model": "gate-pending",
+  "choices": [{"index": 0, "message": {"role": "assistant", "content": "上下文已提交推理闸（gate=pending）..."}, "finish_reason": "stop"}],
+  "gate": "pending",
+  "context_id": "a1b2c3d4...",
+  "context": {"region_index": {...}}
+}
+```
+
+干预流程：`GET /chatgate/{context_id}`（peek）→ `POST /chatgate/{context_id}`（amend）→ 放行出结果。`gate_manager` 默认 `all_off`（关闸直推），仅显式切换后才开闸。
 
 ---
 
@@ -539,6 +561,50 @@ GET /health
   "active_sessions": 42
 }
 ```
+
+---
+
+### 统一闸管理（v0.1.2_b 新增）
+
+> gate_manager 配置面（跨内核闸编排）。供外挂改进服务/调用方查询与切换闸组合。sl 内部闸走组件形态（非 HTTP）。
+
+#### GET /gate-manager/config
+
+查询闸组合注册表 + 各闸开关状态 + ck/pk 挂载态。
+
+```json
+{
+  "active_combo": "all_off",
+  "combos": {
+    "decision_only": ["decision"],
+    "decision_approval": ["decision", "approval"],
+    "intervention_approval": ["intervention", "approval"],
+    "meta_all_on": ["meta", "intervention", "approval"],
+    "all_off": []
+  },
+  "meta_gate": "closed",
+  "ck_attached": true,
+  "pk_attached": true
+}
+```
+
+#### PATCH /gate-manager/config
+
+切换闸组合 / 控制 ck 闸开关（元闸）。
+
+```json
+// 切换闸组合
+{"active_combo": "decision_approval"}
+// 控制 ck 闸开关（on→auto 允许干预 / off→closed 直推）
+{"meta_gate": "on"}
+```
+
+| 参数 | 说明 |
+|------|------|
+| `active_combo` | 切换预制闸组合（未知 → 400） |
+| `meta_gate` | `on`/`off`/`auto`——控制 ck 推理闸本身是否参与（on→auto park 可干预 / off→closed 直推） |
+
+**开闸行为**：当 `meta_gate` 为 `on`/`auto` 时，主路径与相位路径的上下文会被 ck park，chat 响应返回 `gate:"pending"` + `context_id`（见聊天补全的 `gate` 字段），可经 `GET/POST /chatgate/{context_id}`（ck 侧）peek/amend 干预后放行。
 
 ---
 
@@ -1140,8 +1206,10 @@ strata_match:
   url: "http://localhost:13156"                  # strata-match 服务地址
   mock: false                                    # Mock 模式（true=不依赖 strata-match 服务）
 
-textcli:
-  default_endpoint: "http://10.168.1.151/text-cli/cli"  # text-cli 默认节点
+runtime_endpoints:
+  enabled: true                     # 运行时表（v0.1.2_a 取代旧 textcli 段）
+  default_alias: "home-service"     # 默认 alias
+  seeds: []                         # 种子端点
 
 packets:
   enabled: true                     # packets API 总开关
@@ -1150,7 +1218,9 @@ packets:
   max_packets_per_request: 20       # 单次请求最多引用的 packet 数
 ```
 
+**模型多场景**（`model_config.yaml`，_b 唯一真源）：`llm_routing` 定义任意场景（chat/prompt_chat/task_chain/analysis/planning/summarize + 未来新增），`model_selector` 直接透传 service 到 `execution_router`——配置加场景即接通，无需改代码。`llm_gateway` 多网关注册默认关闭（`enabled=false`）。
+
 ---
 
-*文档版本：v1.0*
-*更新时间：2026-08-14 | v0.1.2_a：token 双轨 / synth_pipeline 相位契约 / runtime-endpoints / artifacts / pipelines 开关*
+*文档版本：v1.1*
+*更新时间：2026-08-23 | v0.1.2_b：统一闸 /gate-manager + 开闸 pending + 相位模式档 + 多场景模型配置*

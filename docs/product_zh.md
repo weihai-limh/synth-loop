@@ -1,11 +1,11 @@
 # synth-loop 产品文档
 
 > **文档类型**：产品设计
-> **版本**：v0.1.2_a | **日期**：2026-08-14
+> **版本**：v0.1.2_b | **日期**：2026-08-23
 > **适用范围**：synth-loop
 > **关联文档**：`design_zh.md`、`api_zh.md`
 >
-> synth-loop 是一个 LLM 编排引擎。对外暴露 OpenAI/Anthropic 兼容端点，内部对每次请求做分类、路由、策略注入、任务拆解。v0.1.2 新增多相位管道编排——PipelineSession 管理从想法到落地的全部状态；v0.1.2_a 将相位对外契约重铸为 **chat 多轮**（`synth_pipeline` 字段驱动），并收敛 tc 消费链路（运行时表 + 强化客户端）。
+> synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**。对外暴露 OpenAI/Anthropic 兼容端点，对内对每次请求做整套决策（走哪条路径、装什么上下文、过什么闸、用哪个模型、怎么多步推理），并收束到唯一推理落点。v0.1.2 新增多相位管道编排；v0.1.2_a 将相位对外契约重铸为 **chat 多轮**（`synth_pipeline` 字段驱动）并收敛 tc 消费链路；v0.1.2_b 集成 ck/pk 内核（上下文拼装 + 相位推理）+ 统一闸，相位引擎整体替换为 pk，所有 chat 上下文可被闸优化。
 
 ---
 
@@ -24,26 +24,31 @@
 
 ## 二、synth-loop 解决什么问题
 
-synth-loop 是一个编排引擎。它不对请求做透传转发——它在每次请求中做四件事：
+synth-loop 是一个以 LLM 网关形态暴露的智能交换中枢。它不对请求做透传转发——它在每次请求中做整套决策，并收束到唯一推理落点：
 
 1. **分类**：判断请求复杂度。简单问候走直接通道，复杂任务走全量增强
-2. **路由**：根据复杂度选择执行路径（直答 / 策略注入 / 工具调用 / 任务链拆解）
+2. **路由**：根据复杂度选一条执行路径（直答 / 策略注入 / 工具调用 / 任务链 / 相位推理）
 3. **注入**：从策略层拉取匹配的专家 Prompt、技能分片、工具定义，组装上下文
-4. **执行**：简单请求直接推理，复杂请求拆成任务链逐步推进
-5. **管道编排**（v0.1.2）：管理多相位管道生命周期——计划编译 → 逐相位推进 → 三闸审查 → 异步委托 text-cli 执行长任务
+4. **执行**：简单请求直接推理，复杂请求拆成任务链或相位逐步推进，经推理缝收敛到唯一推理落点
+5. **相位推理**（v0.1.2，_b 整体替换为 pk）：复杂任务拆为分形相位树——结构分形（复杂）/链式分形（中等），规划→路径确认→执行→摘要，每相位可闸审查
+6. **统一闸**（v0.1.2_b）：gate_manager 跨内核编排——相位路径确认/审批（pk 人闸）+ 上下文干预（ck 推理闸）+ 闸开关（元闸），所有 chat 上下文可被闸优化
 
-技术组件（`src/app/services/`）：
+技术组件（`src/app/services/` + `src/app/kernels/`）：
 
 | 组件 | 代码 | 职责 |
 |------|------|------|
 | 复杂度分类 | `complexity_classifier.py` | 规则 + LLM 双层判定 |
-| 执行路由 | `execution_router.py` | 分形决策 + 模型选择（v0.1.2_a：6 场景 + 模型级降级） |
+| 唯一推理落点 | `sl_llm_provider.py`（_b） | 所有路径推理收敛；通用 service 选择 + ck 闸集成 |
+| 执行路由 | `execution_router.py` | 分形决策 + 模型选择（_b：多场景透传，llm_routing 配置唯一真源） |
+| 上下文内核 | `kernels/context_kernel/`（_b vendored） | 六层拼装 + 推理闸 + gate_mode |
+| 相位内核 | `kernels/phase_kernel/`（_b vendored） | 分形相位树 + 三闸 + 检查点 + 推理缝 |
+| 推理缝 | `inference_seam.py`（_b） | SlInferenceSeam：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸 |
+| 统一闸 | `gate_manager.py`（_b） | 跨内核闸编排：GateType 五类 + 组合函数 + 跨内核循环 |
 | 任务链执行器 | `task_chain_executor.py` | plan → execute → verify → summarize |
 | 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
 | 协议翻译 | `protocol_translator.py` | Anthropic ↔ OpenAI 格式互转 |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
-| 运行时表 + 强化客户端（v0.1.2_a） | `runtime_endpoints.py` + `textcli_enhanced_client.py` | tc 消费收敛：alias 路由 / rank 降级 / 信封直读 |
-| 相位编排器（v0.1.2_a） | `phase_chat_orchestrator.py` | chat 多轮驱动相位：synth_pipeline 状态机 + 决策点 |
+| 相位编排器 | `phase_chat_orchestrator.py` | chat 多轮契约（_b 薄壳委托 pk 引擎） |
 
 ---
 
@@ -99,10 +104,11 @@ curl http://localhost:13155/v1/chat/completions \
 | 结果 | 为什么 |
 |------|--------|
 | **按复杂度自动分流** | 简单问题不消耗策略匹配，走规则匹配直答通道 |
-| **多相位管道编排（v0.1.2）** | 复杂任务拆为相位序列自动推进——三闸控制审查深度，异步委托长任务 |
+| **多相位推理（v0.1.2，_b）** | 复杂任务拆为分形相位树自动推进——路径确认/审批/质量闸控制审查深度，只回退当前相位 |
+| **统一闸（v0.1.2_b）** | gate_manager 跨内核编排 ck 推理闸 + pk 人闸 + 元闸，所有 chat 上下文可被闸优化（开闸时 park，可 peek/amend） |
 | **相位 chat 契约（v0.1.2_a）** | 相位 = chat 多轮：`synth_pipeline` 字段回传驱动（confirm/regenerate/abort/check_result），无需 9 端点 API——普通请求永不自动进相位（保守阈值） |
-| **tc 消费收敛（v0.1.2_a）** | 三套自建 tc 调用收敛为运行时表 + 强化客户端：alias 精确路由、同 alias rank 降级、鉴权失败不降级、长任务 check_result 轮询 |
-| **LLM 层升级（v0.1.2_a）** | 6 场景路由（planning 强模型/summarize 便宜模型）+ 模型级降级（503 切同池/502 切端点） |
+| **tc 消费收敛（v0.1.2_a）** | 三套自建 tc 调用收敛为运行时表 + 强化客户端：alias 精确路由、同 alias rank 降级、鉴权失败不降级 |
+| **LLM 层（v0.1.2，_b 多场景透传）** | llm_routing 多场景配置唯一真源（planning/summarize/chat/... 任意 service 透传）+ 模型级降级（503 切同池/502 切端点） |
 | **统一 token（v0.1.2_a）** | 权限（token）+ 身份（user-id）双轨，先验权再归身份；运行时表管理 API admin scope |
 | **装 100 个工具 token 不涨** | 不注册上千个工具，只注册少量内置工具 + 2 个元工具 + 按需注入动态工具 |
 | **不用手写 Prompt** | 策略层自动匹配专家人设 + skills 技能分片 |
@@ -130,14 +136,14 @@ curl http://localhost:13155/v1/chat/completions \
 
 | 维度 | LiteLLM | Portkey | **synth-loop** |
 |------|:-------:|:-------:|:--------------:|
-| 核心定位 | 提供商抽象 | 企业治理 | **编排引擎** |
+| 核心定位 | 提供商抽象 | 企业治理 | **智能交换中枢（网关形态）** |
 | 覆盖方式 | 逐个适配 SDK | 逐个适配 SDK | **协议级兼容（2 个协议）** |
 | 智能 Prompt | ❌ | ❌ | ✅ |
 | 动态工具注入 | ❌ | ❌ | ✅ |
 | 分形路由 | ❌ | ❌ | ✅ |
-| 任务链推进 | ❌ | ❌ | ✅ |
+| 相位推理 + 统一闸 | ❌ | ❌ | ✅ |
 
-> **核心差异**：LiteLLM/Portkey 解决"如何调用 LLM"。synth-loop 解决"每个调用怎么决策路径 + 怎么注入上下文 + 怎么拆解执行"。两个赛道可以并存。
+> **核心差异**：LiteLLM/Portkey 解决"如何调用 LLM"。synth-loop 解决"每个调用怎么决策路径 + 怎么注入上下文 + 怎么拆解执行 + 怎么过闸优化"。两个赛道可以并存。
 
 ---
 
@@ -161,8 +167,8 @@ curl http://localhost:13155/v1/chat/completions \
 | **普通模式** | 请求 → synth-loop 分类 + 路由 → 下游 LLM | 个人开发、快速体验 |
 | **增强模式** | 请求 → synth-loop → 策略注入 → 下游 LLM | 生产使用，需专家 Prompt + 技能分片 |
 | **完整模式** | 请求 → synth-loop → 策略注入 + 工具调度 → 下游 LLM | 复杂任务链，需跨服务工具调用 |
-| **管道模式（v0.1.2）** | 创建 PipelineSession → 计划编译 → 逐相位推进 → 三闸审查 → 异步委托 text-cli | 多步骤创作/开发/设计流程，需人工审查节点 |
-| **相位 chat 模式（v0.1.2_a）** | 普通 chat 请求携带 `synth_pipeline` 字段 → 相位多轮推进（规划→过闸→执行→check_result）；显式触发，不劫持普通请求 | 需要相位编排的 chat 应用，无需调用 9 端点 API |
+| **相位模式（v0.1.2，_b 整体替换为 pk）** | 显式触发（"用相位/用链"）→ pk 分形相位树推进（规划→路径确认→执行→摘要，经推理缝收敛唯一落点） | 多步骤创作/开发/设计流程，需人工审查节点；执行经推理缝 LLM（非 text-cli） |
+| **统一闸模式（v0.1.2_b）** | gate_manager 编排 ck/pk 闸，经 `/gate-manager/config` 切换组合；开闸时上下文 park 可 peek/amend | 需要上下文可干预/优化的应用，为未来自动化优化留可能 |
 
 ---
 
