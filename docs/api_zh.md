@@ -1096,7 +1096,7 @@ curl http://localhost:13155/v1/chat/completions \
   }'
 ```
 
-**第 1 轮响应**（`awaiting_plan_confirm`，回传 `synth_pipeline.id` 继续）：
+**第 1 轮响应**（`awaiting_plan_confirm`，回传 `synth_pipeline.id` 继续；plan 产物经 `artifact_ref` 取回）：
 
 ```json
 {
@@ -1108,17 +1108,16 @@ curl http://localhost:13155/v1/chat/completions \
   "usage": {"prompt_tokens": 0, "completion_tokens": 0},
   "synth_pipeline": {
     "id": "p1", "step": "awaiting_plan_confirm",
-    "phase_index": 0, "phase_total": 3, "artifact_ref": null
+    "phase_index": 0, "phase_total": 3, "artifact_ref": "art_p1_plan"
   }
 }
 ```
 
-**第 2 轮（确认规划 → 生成路径）**：
+**第 2 轮（确认规划 → 启动管道、生成第一个相位 path）**——回传 `synth_pipeline: {id, action}` 即可恢复相位会话（服务端按 `synth_pipeline.id` 定位内存会话，无需额外 Header）：
 
 ```bash
 curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-synthloop-session-id: <上轮响应 Header 的 session-id>" \
   -d '{
     "model": "deepseek-v4-flash",
     "messages": [{"role": "user", "content": "确认"}],
@@ -1126,19 +1125,21 @@ curl http://localhost:13155/v1/chat/completions \
   }'
 ```
 
-**第 2 轮响应**（`awaiting_path_confirm`，路径确认）：
+**第 2 轮响应**（`awaiting_path_confirm`，路径确认；`artifact_ref` 为 path 产物）：
 
 ```json
 {
   "id": "chatcmpl-phase-a1b2c3d4",
   "choices": [{"index": 0, "message": {"role": "assistant",
-    "content": "第一个相位路径：市场分析（分析目标市场、规模与增长）..."}, "finish_reason": "stop"}],
+    "content": "相位 1/3「市场分析」的 path 如下：\n..."}, "finish_reason": "stop"}],
   "synth_pipeline": {"id": "p1", "step": "awaiting_path_confirm",
-    "phase_index": 0, "phase_total": 3, "artifact_ref": "art_p1_result_0"}
+    "phase_index": 0, "phase_total": 3, "artifact_ref": "art_p1_path_0"}
 }
 ```
 
-**第 3 轮（确认路径 → 执行相位，经推理缝 LLM）**：回传 `{"id": "p1", "action": "confirm"}` → 执行当前相位（normal routing）→ 推进下一相位。逐相位 confirm，直至 `step: "completed"`。
+**第 3 轮（确认路径 → 执行当前相位，经推理缝 LLM）**：回传 `{"id": "p1", "action": "confirm"}` → 执行当前相位（normal routing）。执行完成后若该相位 `require_human_approval` → 进入 `awaiting_approval`（回传 confirm 审批通过 / reject 驳回重试）；否则自动推进下一相位（`awaiting_path_confirm`）直至 `step: "completed"`。
+
+> 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（子相位直接出 path，钳制深度）。执行经推理缝 LLM（非 text-cli）；相位上下文可被 ck 闸监听/优化（开闸时）。
 
 > 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（子相位直接出 path，钳制深度）。执行经推理缝 LLM（非 text-cli）；相位上下文可被 ck 闸监听/优化（开闸时）。
 
