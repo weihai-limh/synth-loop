@@ -296,19 +296,23 @@ async def chat_completions(
     if packets_context:
         client_system_messages.insert(0, {"role": "system", "content": packets_context})
 
-    # _a 3.6: 相位 chat 路由（显式调用——带 synth_pipeline 字段或相位意图触发）
-    if request.synth_pipeline or _is_phase_intent(user_text):
+    # _b 相位标签触发（取代中文关键词）：解析 <tc-phase> / <tc-phase-chain> 得 mode + 目标
+    phase_mode, phase_goal = _parse_phase_tag(user_text)
+    if request.synth_pipeline or phase_mode is not None:
         from ..services.phase_chat_orchestrator import (
             get_phase_orchestrator, PhaseNotTriggeredError,
         )
         try:
             orchestrator = get_phase_orchestrator()
             gw_session_id_for_phase = http_request.headers.get("x-synthloop-session-id") if http_request else None
+            # 标签剥除：相位目标用标签内文本（无标签时用原 user_text，用于 synth_pipeline 回传）
+            phase_user_text = phase_goal if phase_goal else user_text
             phase_response = await orchestrator.handle_chat(
-                user_text=user_text,
+                user_text=phase_user_text,
                 synth_pipeline=request.synth_pipeline,
                 session_id=gw_session_id_for_phase,
                 user_id=getattr(session, "user_id", None),
+                mode=phase_mode,
             )
             # 包装为 OpenAI 格式响应（content + synth_pipeline 字段）
             payload = {
@@ -640,22 +644,26 @@ TASK_ID_PATTERN = re.compile(r"Task-(.+?)-synthloop")
 USER_MEMORY_PATTERN = re.compile(r"<user-memory>(.*?)</user-memory>", re.DOTALL)
 
 
-_PHASE_INTENT_PATTERNS = [
-    r"用相位",
-    r"用管道",
-    r"pipeline\s*模式",
-    r"分阶段(执行|处理|完成)",
-    r"相位(模式|驱动)",
-]
+# _b 相位标签触发（取代中文关键词）：<tc-phase>（结构分形 structural）/ <tc-phase-chain>（链式分形 chain）
+_PHASE_TAG_CHAIN = re.compile(r"<tc-phase-chain>(.*?)</tc-phase-chain>", re.DOTALL)
+_PHASE_TAG_STRUCT = re.compile(r"<tc-phase>(.*?)</tc-phase>", re.DOTALL)
 
 
-def _is_phase_intent(user_text: str) -> bool:
-    """_a 3.6: 相位意图识别（规则层，R6——显式表达才触发，普通请求永不自动进相位）"""
-    import re
-    for pattern in _PHASE_INTENT_PATTERNS:
-        if re.search(pattern, user_text, re.IGNORECASE):
-            return True
-    return False
+def _parse_phase_tag(user_text: str) -> tuple[Optional[str], Optional[str]]:
+    """解析相位标签，返回 (mode, goal)。
+
+    - `<tc-phase-chain>目标</tc-phase-chain>` → ("chain", 标签内目标)
+    - `<tc-phase>目标</tc-phase>`           → ("structural", 标签内目标)
+    - 无标签 → (None, None)
+    链式标签优先（更具体）。标签剥除后，标签内文本作为相位目标传给 handle_chat。
+    """
+    m = _PHASE_TAG_CHAIN.search(user_text)
+    if m:
+        return "chain", m.group(1).strip()
+    m2 = _PHASE_TAG_STRUCT.search(user_text)
+    if m2:
+        return "structural", m2.group(1).strip()
+    return None, None
 
 
 def _extract_user_memory(text: str, session: Session) -> str | None:

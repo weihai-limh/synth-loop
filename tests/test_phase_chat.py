@@ -62,7 +62,7 @@ class TestPhaseChatProtocol:
     def test_new_phase_intent_returns_plan(self, orchestrator):
         """chat#1 相位意图 → 返回规划 + synth_pipeline（awaiting_plan_confirm）"""
         async def run():
-            resp = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp = resp["synth_pipeline"]
             assert sp["step"] == "awaiting_plan_confirm"
             assert sp["id"]
@@ -86,7 +86,7 @@ class TestPhaseChatProtocol:
         """chat#2 confirm → 生成 path → awaiting_path_confirm → confirm → 执行"""
         async def run():
             # chat#1: 规划
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
 
             # chat#2: confirm 规划 → 生成 path
@@ -106,7 +106,7 @@ class TestPhaseChatProtocol:
     def test_abort_flow(self, orchestrator):
         """abort → pipeline aborted 终态"""
         async def run():
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
             resp2 = await orchestrator.handle_chat(
                 "停止", synth_pipeline={"id": sp1["id"], "action": "abort"})
@@ -127,7 +127,7 @@ class TestPhaseChatProtocol:
     def test_unknown_action(self, orchestrator):
         """未知 action → 不推进"""
         async def run():
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
             resp = await orchestrator.handle_chat(
                 "xx", synth_pipeline={"id": sp1["id"], "action": "bogus_action"})
@@ -138,7 +138,7 @@ class TestPhaseChatProtocol:
     def test_regenerate_flow(self, orchestrator):
         """regenerate → 重新生成当前相位 path（P9 语义：不重开规划）"""
         async def run():
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
             with respx.mock:
                 respx.post("http://mock-tc:28050/text-cli/cli").mock(
@@ -158,7 +158,7 @@ class TestPhaseChatProtocol:
     def test_execute_via_seam(self, orchestrator):
         """整体替换（_b）：执行经推理缝 mock seam 正常完成（不走 tc）"""
         async def run():
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
             # confirm 规划 → 生成 path
             resp2 = await orchestrator.handle_chat(
@@ -177,7 +177,7 @@ class TestPhaseChatProtocol:
     def test_execute_completes_all_phases(self, orchestrator):
         """整体替换（_b）：执行经 mock seam 正常完成，推进至所有相位完成（不走 tc）"""
         async def run():
-            resp1 = await orchestrator.handle_chat("请用相位模式帮我写一份商业计划书")
+            resp1 = await orchestrator.handle_chat("帮我写一份商业计划书", mode="structural")
             sp1 = resp1["synth_pipeline"]
             # 规划 → path
             resp2 = await orchestrator.handle_chat(
@@ -196,3 +196,29 @@ class TestPhaseChatProtocol:
             assert resp["content"]  # 有响应（不挂起）
             return True
         assert asyncio.run(run())
+
+    def test_phase_tag_structural(self, orchestrator):
+        """_b 标签触发：<tc-phase> → structural + 剥除标签的目标"""
+        from app.routers.chat import _parse_phase_tag
+        mode, goal = _parse_phase_tag("<tc-phase>帮我写市场调研报告</tc-phase>")
+        assert mode == "structural"
+        assert goal == "帮我写市场调研报告"
+
+    def test_phase_tag_chain(self, orchestrator):
+        """_b 标签触发：<tc-phase-chain> → chain"""
+        from app.routers.chat import _parse_phase_tag
+        mode, goal = _parse_phase_tag("<tc-phase-chain>处理中等任务</tc-phase-chain>")
+        assert mode == "chain"
+        assert goal == "处理中等任务"
+
+    def test_phase_tag_chain_priority(self, orchestrator):
+        """_b 标签触发：链式标签优先于结构标签"""
+        from app.routers.chat import _parse_phase_tag
+        mode, _ = _parse_phase_tag("<tc-phase>结构任务</tc-phase> <tc-phase-chain>链任务</tc-phase-chain>")
+        assert mode == "chain"
+
+    def test_phase_tag_no_label(self, orchestrator):
+        """_b 标签触发：无标签不触发（中文关键词已彻底废除）"""
+        from app.routers.chat import _parse_phase_tag
+        mode, goal = _parse_phase_tag("请用相位模式帮我写报告")  # 中文词不再触发
+        assert mode is None and goal is None
