@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v0.1.2_a | **日期**：2026-08-14
+> **版本**：v0.1.2_c | **日期**：2026-08-24
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -11,11 +11,11 @@
 
 ## 一、核心定位
 
-synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**（_b 定位）——对外是一张 LLM 网关的"脸"（OpenAI/Anthropic 兼容端点），对内是一个做智能分派与收束的交换中枢：对每次请求做整套决策（走哪条路径、装什么上下文、过什么闸、用哪个模型、怎么多步推理），最终把所有这些推理收束到唯一推理落点（`sl_llm_provider`）。
+synth-loop 是一个 **以 LLM 网关形态暴露的任务处理中枢**——对外是一张 LLM 网关的"脸"（OpenAI/Anthropic 兼容端点），对内是一个做任务分派与收束的交换中枢：对每次请求做整套决策（走哪条路径、用什么模型、装什么上下文、过什么闸、用哪个模型、怎么多步推理），最终把所有这些推理收束到唯一推理落点（`sl_llm_provider`）。
 
 ```
 API 代理：请求 → 转发 → 响应（不改语义）
-synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` 标签 → pk 相位推理）] → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 任务链推理 → 唯一推理落点 → 流式返回
+synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（ck 拼装 + 闸）→ 任务链推理 → 唯一推理落点 → 流式返回
 ```
 
 ### 是什么 / 不是什么
@@ -25,7 +25,7 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
 | 智能交换中枢——分派 + 收束（`src/app/services/sl_llm_provider.py` 唯一推理落点） | 匹配引擎（策略匹配由外部策略服务负责） |
 | 协议兼容端点——OpenAI + Anthropic 双协议接入（`src/app/services/protocol_translator.py`） | API 代理/中立网关——不做请求透传，每个请求都经历编排决策 |
 | 上下文内核承接方——ck 六层拼装 + 闸监听（`src/app/kernels/context_kernel/`） | LLM 框架（不封装 LLM 调用） |
-| 编排决策者——分形路由、相位推理（pk）、统一闸编排 | 策略持有者（策略由外部策略服务管理） |
+| 任务处理者——分形路由、相位推理（pk）、统一闸管理、统一数据面 | 策略持有者（策略由外部策略服务管理） |
 
 ---
 
@@ -70,7 +70,6 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
 | 下游 LLM | `POST /v1/chat/completions` | API Key | OpenAI 兼容 HTTP | `src/app/services/downstream_llm.py` |
 | text-cli | `POST /text-cli/cli`（经运行时表路由） | 内网 | HTTP JSON | `src/app/services/textcli_enhanced_client.py`（v0.1.2_a） |
 
-> v0.1.2_a：`textcli_client.py` 已废弃（R5，不留兼容层）；tc 消费统一走**运行时表（`runtime_endpoints`）+ 强化客户端（`textcli_enhanced_client`）**——alias 路由 / rank 降级 / 令牌注入全在客户端内。
 
 ---
 
@@ -82,7 +81,8 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
 |------|------|------|
 | OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions`（_b 主路径归并 sl_llm_provider + 过 ck 闸） |
 | Anthropic 入口 | `anthropic_chat.py` — 请求翻译 + dispatch | `/v1/messages` |
-| 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`（v0.1.1 新增） |
+| 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`|
+| 数据面包-永久区通道 | `longdata.py` — doc/memory 引入/删除/列出 | `/v1/longdata` |
 | 健康检查 | `health.py` | `/health` |
 | 异步任务 API | `tasks.py` — GET + POST cancel | `/api/v1/tasks/{id}` |
 | 运行时表管理 API | `runtime_endpoints.py` — CRUD（v0.1.2_a） | `/api/v1/runtime-endpoints`（admin scope） |
@@ -118,14 +118,16 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
 | Job 存储 | `job_store.py` | 跨组件 Job 协同 |
-| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0.1.1 新增） |
+| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0.1.1 新增；_c 类型准入改配置驱动 `packets.types`，空配置回落内置默认） |
 | 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0.1.1 新增） |
+| 永久区数据面 | `longdata.py` | 通道B（永久区）：doc/memory 引入/删除/列出，落 longdata 表 + 永久区（_c 新增） |
+| 相位产物桥接 | `sl_artifact_store.py` | 链路 C：实现 pk `ArtifactStore` 端口，落 sl SQLite（_c 新增，替换 pk 内存 `InMemoryArtifactStore`） |
 | 运行时表 | `runtime_endpoints.py` | tc 端点配置面（v0.1.2_a）：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
 | 强化客户端 | `textcli_enhanced_client.py` | tc 执行面（v0.1.2_a）：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
 | 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约（_b 整体替换）：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配），sl 自持状态机退役 |
 | 相位内核 | `kernels/phase_kernel/` | _b vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填） |
 | 上下文内核 | `kernels/context_kernel/` | _b vendored——ck 组件：六层拼装 + 推理闸 + gate_mode（纯副本，sl 适配层封装） |
-| 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配） |
+| 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配；_c 放宽：artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict） |
 | token 服务 | `token_service.py` | 统一 token（v0.1.2_a）：issue_token/verify_token/map_user_id |
 
 ### 3.3 工具层（`src/app/tools/`）
@@ -159,7 +161,7 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
   ├── 消息前置检查层
   │     ├── Task-(.+)-synthloop 匹配 → 查 tasks 表 → 终点响应
   │     ├── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
-  │     └── [_b] 相位路由：带 synth_pipeline 字段 → 解析 action → pk 相位推理（薄壳委托）
+  │     └── 相位路由：带 synth_pipeline 字段 → 解析 action → pk 相位推理（薄壳委托）
   │    代码: src/app/routers/chat.py chat_completions()
   │
   ├── 复杂度分类
@@ -167,7 +169,7 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
   │     └── 层2: 分形 Prompt（1 次 LLM 调用）
   │    代码: src/app/services/complexity_classifier.py
   │
-  ├── [_b] 相位前置拦截：命中相位 XML 标签 → 直接路由到 pk 相位推理（不走分形）
+  ├── 相位前置拦截：命中相位 XML 标签 → 直接路由到 pk 相位推理（不走分形）
   │     ├── <tc-phase>目标</tc-phase>           → 结构分形（structural，复杂）
   │     └── <tc-phase-chain>目标</tc-phase-chain> → 链式分形（chain，中等）
   │     （标签显式锁定，标签内文本为相位目标；无标签 → 进入分形路由 ↓）
@@ -179,7 +181,7 @@ synth-loop：请求 → [相位前置拦截（`<tc-phase>`/`<tc-phase-chain>` �
   │     └── e,f/task_chain → 任务链拆解执行
   │    代码: src/app/routers/chat.py chat_completions() dispatch 决策链
   │
-  ├── [_b] 主路径归并：所有分支经 build_messages 收束 → sl_llm_provider（唯一推理落点）
+  ├── 主路径归并：所有分支经 build_messages 收束 → sl_llm_provider（唯一推理落点）
   │     ├── 上下文经 ck 拼装 + 闸监听（gate_mode=auto 时 park 返回 pending，可 peek/amend）
   │     └── 模型经 llm_routing 多场景配置（service 透传，无白名单截断）
   │    代码: src/app/services/sl_llm_provider.py + kernels/context_kernel/
@@ -232,6 +234,34 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
   └── 推理: downstream_llm.chat() / task_chain_executor.execute()
 ```
 
+### 4.4 数据面双通道
+
+> **本质**：数据面的分野是**永久区 vs 临时区**，而非 doc/memory vs packets。按持久性分双通道。
+
+```
+┌─────────────────────────────────────────────────┐
+│ 数据面 —— 双通道（按持久性分野）                  │
+├─────────────────────────────────────────────────┤
+│  通道A：临时区通道（packets · 已有）              │
+│    入口    ：/v1/packets                         │
+│    载荷    ：环境上下文（browser/小程序/IM/IoT）   │
+│    类型    ：config 准入（packets.types，_c）     │
+│    处理    ：预处理器（代码层，按类型专门提取）      │
+│    存储    ：内存 + TTL（瞬态，30min 过期）        │
+│    注入    ：摘要注入 system prompt               │
+├─────────────────────────────────────────────────┤
+│  通道B：永久区通道（/v1/longdata · _c 新增）       │
+│    入口    ：/v1/longdata（add/del/list）         │
+│    载荷    ：doc（文档）+ memory（记忆片段）        │
+│    类型    ：写死代码（doc/memory 两类）           │
+│    处理    ：通用文本处理（去空格等基本操作）        │
+│    存储    ：longdata 表 + 永久区（长期存在）       │
+│    注入    ：经 build_messages 从永久区注入         │
+└─────────────────────────────────────────────────┘
+```
+
+**链路 C 相位产物桥接**：pk 引擎写产物经 `SlArtifactStore`（实现 pk `ArtifactStore` 端口）落 sl SQLite `artifacts` 表——产物不再只进内存，`/v1/artifacts` 可对外取，pk 跨相位上下文传递（`_fetch_parent_context`）经 `fetch` 回链。
+
 ---
 
 ## 五、统一终端契约
@@ -243,6 +273,7 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 | `/v1/chat/completions` | OpenAI | POST | 无（可选 Bearer） | `chat.py` |
 | `/v1/messages` | Anthropic | POST | 无（可选 x-api-key） | `anthropic_chat.py` |
 | `/v1/packets` | JSON | POST | 无 | `packets.py`（v0.1.1） |
+| `/v1/longdata` | JSON | POST/DELETE/GET | 无 | `longdata.py`（v0.1.2_c） |
 | `/api/v1/runtime-endpoints` | JSON | GET/POST/PATCH/DELETE | admin scope（v0.1.2_a） | `runtime_endpoints.py` |
 | `/api/v1/artifacts/{id}` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
 | `/api/v1/artifacts?pipeline_id=` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
@@ -316,7 +347,7 @@ src/
 | `auth` | `config.yaml` | enabled=false, required=false | `middleware/auth.py` |
 | `session_memory` | `config.yaml` | enabled=true | `routers/chat.py` |
 | `async_tasks` | `config.yaml` | enabled=false, max_per_user=3 | `routers/chat.py` |
-| `packets` | `config.yaml` | enabled=true, ttl_seconds=1800 | `packet_store.py`（v0.1.1） |
+| `packets` | `config.yaml` | enabled=true, ttl_seconds=1800, types=13 类准入列表（_c） | `packet_store.py`（v0.1.1；_c 类型准入配置驱动） |
 | `endpoints` | `model_config.yaml` | 端点池定义 | `execution_router.py` |
 | `llm_routing` | `model_config.yaml` | 路由映射（_b：多场景唯一真源，任意 service 透传无白名单截断） | `execution_router.py` → `model_selector.py` → `sl_llm_provider.py` |
 | `llm_gateway` | `model_config.yaml` | enabled=false, gateways（多网关注册表，默认未启用） | `downstream_llm.py` |
@@ -331,7 +362,8 @@ src/
 | `users` | `gateway.db` | 用户认证（v0.1.1） | 无 |
 | `tasks` | `gateway.db` | 异步任务（v0.1.1） | 无 |
 | `runtime_endpoints` | `gateway.db` | tc 端点配置面（v0.1.2_a）：alias 多物理行 + rank 降级 + token 加密 | 无 |
-| `artifacts` | `gateway.db` | 相位产物（v0.1.2_a）：pipeline_id/phase_index/type/ref/data，TTL 24h | 无 |
+| `artifacts` | `gateway.db` | 相位产物（v0.1.2_a；_c 放宽）：artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict，TTL 24h | 无 |
+| `longdata` | `gateway.db` | 永久区通道（v0.1.2_c）：doc/memory 引入（id/session_id/type/content/created_at），无 TTL | 无 |
 | `tokens` | `gateway.db` | 统一 token（v0.1.2_a）：sha256 hash + scope 分层 | 无 |
 
 ---
@@ -345,7 +377,6 @@ src/
 | 部署在内网，外部不可直达 | 低——内网隔离 | 无额外认证（出厂默认） |
 | 恶意客户端伪造 user-id | 中——多租户场景 | `auth.enabled=true, required=true` 时强制校验（v0.1.2_a：+ token 双轨） |
 | 下游 LLM API Key 泄露 | 高——财务损失 | Key 配在 config.yaml 中，建议环境变量注入 |
-| Prompt 注入 | 中——越狱风险 | 无专门检测（v0.2 计划） |
 | tc 令牌外泄（v0.1.2_a） | 高 | 运行时表 token 加密（`SELF_TOKEN_ENC_KEY`）+ 管理 API 脱敏 + admin scope |
 
 **最坏情况推演**：config.yaml 泄露 → 攻击者可调用下游 LLM 产生费用。缓解：生产环境使用 `${ENV_VAR}` 环境变量注入（`_resolve_env_vars()` 内置支持，见 `src/app/config.py`）。
@@ -409,10 +440,11 @@ src/
 |------|---------|-----------|
 | v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | 基线版本——功能完整度 |
 | v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
-| v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道大脑 |
+| v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道 |
 | v0.1.2_a | tc 消费链路收敛（运行时表 + 强化客户端 + textcli_client 废弃）+ LLM 层（6 场景 + 降级）+ 相位 chat 契约（synth_pipeline 多轮）+ 统一 token；72 测试全绿 | 纠偏版本（不升版本号） |
-| v0.1.2_b | vendored 集成 ck/pk + 三前置（问题分形链式/模型三档/统一闸 gate_manager）+ 整体替换（pk 相位引擎）+ 推理收束（sl_llm_provider 唯一落点）+ 主路径过闸 + model_selector 多场景透传；104 测试全绿 | 代码集成补强（不升版本号）——智能交换中枢 |
-| v0.2（规划） | 质量反馈分析 + 路由准确率可观测 | 闭环版本——骨架填肉 |
+| v0.1.2_b | vendored 集成 ck/pk + 三前置（问题分形链式/模型三档/统一闸 gate_manager）+ 整体替换（pk 相位引擎）+ 推理收束（sl_llm_provider 唯一落点）+ 主路径过闸 + model_selector 多场景透传；104 测试全绿 | 代码集成补强（不升版本号）——相位,上下文关联重新集成 |
+| v0.1.2_c | 数据面内聚：双通道（临时区 packets 类型准入进配置 `packets.types` + 永久区 `/v1/longdata`）+ 链路 C 桥接（`SlArtifactStore` 落 SQLite，pk 产物可对外取）+ artifacts 表放宽（phase_index_txt/str-dict content）+ SlDataPlane 收尾；138 测试全绿 | 代码集成补强（不升版本号）——数据面内聚 |
+
 
 ---
 
@@ -430,30 +462,11 @@ src/
 | `task_chain` 分支未归并 sl_llm_provider（_b） | task_chain_executor 内部仍直接调 downstream_llm，未收敛唯一推理落点 | 内部实现较复杂，留后续完整归并 |
 | `logic_category` 未接入模型选择（_b） | 细分类型维度未用于模型选择 | 预留签名，未来精细化维度 |
 
-### 代码债表
 
-| 位置 | 债务 | 计划版本 |
-|------|------|:-------:|
-| `task_chain_executor.py` | `_check_cancelled()` aiosqlite 同步查询 | v0.2 |
-| `chat.py` | `FRACTAL_SYSTEM_PROMPT` 硬编码英文 | v0.2 |
-| `chat.py` | `_create_async_task()` 本地 import aiosqlite | v0.2 |
 
 ---
 
-## 十三、架构预留
-
-以下能力计划在后续版本交付：
-
-| 能力 | 架构中的设计位 | 计划版本 |
-|------|------|:---:|
-| 制品收集 CDN 落地 | 管道每相位产出物经 CDN 分发 | v0.1.3 |
-| 物理安全/人授权激活 | 物理操作相位的播片审批 + 安全规则 | v0.1.3 |
-| 路由准确率可观测 | 分形决策路由的准确性指标收集与可视化 | v0.2 |
-| 质量反馈分析 | feedback 数据沉淀后的分析优化逻辑 | v0.2 |
-
----
-
-## 十四、测试架构
+## 十三、测试架构
 
 ### 测试分层
 
@@ -478,7 +491,7 @@ curl -s http://localhost:13155/v1/chat/completions \
 
 ---
 
-## 十五、设计原则
+## 十四、设计原则
 
 | 原则 | 含义 | 体现 |
 |------|------|------|
@@ -488,9 +501,6 @@ curl -s http://localhost:13155/v1/chat/completions \
 | **单一真相来源** | 规则→yaml，模型→yaml，配置→yaml | `complexity_rules.yaml`、`model_config.yaml`、`config.yaml` |
 | **无状态组件优先** | 核心决策组件不持有状态 | ComplexityClassifier / ModelSelector / LogicAbstractor |
 | **Dispatch 是模式不是 API** | 嵌入已有端点，不增新路由 | 分形决策嵌入 `/v1/chat/completions` 内部 |
-| **相位显式触发（v0.1.2_a）** | 相位是执行编排的可选模块，普通请求永不自动进相位 | `synth_pipeline` 字段 + R6 保守阈值 |
-| **指令优先（v0.1.2_a）** | LLM 拼 `AI:` 指令，sl 只校验透传，杜绝双前缀 | `dynamic_tool_executor` + 强化客户端 |
+
 
 ---
-
-_文档版本：v1.0｜2026-08-14｜新增 §十三 架构预留 + V0.1.2_a（tc 消费收敛/LLM 层/相位 chat 契约/统一 token）_

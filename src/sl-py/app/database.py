@@ -190,19 +190,39 @@ async def init_database() -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash)")
 
         # _a P4.3: artifacts 表（数据面下行——相位产物存储，TTL 24h）
+        # _c: phase_index_txt 承载 pk 的 phase_path 树路径（如 "0-1"）；artifact_id 唯一必填，其余可空
         await db.execute("""
             CREATE TABLE IF NOT EXISTS artifacts (
                 artifact_id TEXT PRIMARY KEY,
                 pipeline_id TEXT,
-                kind TEXT,              -- plan | path | result | final
-                phase_index INTEGER,
-                content TEXT,           -- JSON 序列化
+                kind TEXT,              -- plan | path | result | summary
+                phase_index INTEGER,    -- 旧扁平索引（兼容遗留）
+                phase_index_txt TEXT,   -- _c 新增：phase_path 树路径（如 "0-1"）
+                content TEXT,           -- JSON 序列化（str 或 dict）
                 summary TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP
             )
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_pipeline ON artifacts(pipeline_id)")
+        # _c 迁移：旧库加 phase_index_txt 列（不丢数据）
+        await _add_column_if_not_exists(db, "artifacts", "phase_index_txt", "TEXT")
+        await db.execute(
+            "UPDATE artifacts SET phase_index_txt = CAST(phase_index AS TEXT) "
+            "WHERE phase_index_txt IS NULL AND phase_index IS NOT NULL"
+        )
+
+        # _c: longdata 表（永久区通道——doc/memory 引入，无 TTL）
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS longdata (
+                id         TEXT PRIMARY KEY,          -- 内部 id（add 时生成，等价 loaded_docs.doc_id）
+                session_id TEXT NOT NULL,
+                type       TEXT NOT NULL,             -- "doc" | "memory"
+                content    TEXT NOT NULL,
+                created_at REAL
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_longdata_session ON longdata(session_id)")
 
         await db.commit()
 

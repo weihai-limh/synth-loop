@@ -123,6 +123,7 @@ class PacketsSettings(BaseModel):
     max_packet_size_mb: int = 5
     max_packets_per_request: int = 20
     max_inline_data_per_request: int = 10
+    types: list[str] = []          # _c 新增：类型准入完整列表（空时回落内置默认）
 
 
 def get_auth_settings() -> AuthSettings:

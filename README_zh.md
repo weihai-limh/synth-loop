@@ -11,8 +11,8 @@
 ## ⚡ 30 秒看到效果
 
 ```bash
-pip install -r requirements.txt
-PYTHONPATH=src python -m app.main
+pip install -r src/sl-py/requirements.txt
+PYTHONPATH=src/sl-py python -m app.main
 
 curl -s http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -66,8 +66,8 @@ synth-loop 是一个 **以 LLM 网关形态暴露的智能交换中枢**——**
 ### 1️⃣ 快速通道（2 分钟）
 
 ```bash
-pip install -r requirements.txt
-PYTHONPATH=src python -m app.main
+pip install -r src/sl-py/requirements.txt
+PYTHONPATH=src/sl-py python -m app.main
 
 # 验证
 curl http://localhost:13155/v1/chat/completions \
@@ -142,6 +142,8 @@ synth-loop 不只是单请求路由器——对复杂任务，它是**多步相�
 |------|--------|
 | **按复杂度自动分流** | 简单问候不消耗策略匹配，走规则匹配直答通道 |
 | **多相位推理（v0.1.2）** | 复杂任务拆为分形相位树自动推进——路径确认/审批/质量闸控制审查深度，只回退当前相位 |
+| **数据面双通道（v0.1.2_c）** | 临时区 packets（环境上下文，类型准入配置化）+ 永久区 `/v1/longdata`（doc/memory 长期引用） |
+| **相位产物落 SQLite（v0.1.2_c）** | pk 相位产物经桥接落库，`/v1/artifacts` 可对外取，跨相位上下文回链可靠 |
 | **装 100 个工具 token 不涨** | 不注册上千个工具，只注册 2 个元工具 + 按需注入动态工具 |
 | **不用手写 Prompt** | 策略层自动匹配专家人设 + skills 技能分片 |
 | **复杂任务一键完成** | "先分析再报告"——只需一个请求，系统自动拆解执行 |
@@ -162,27 +164,38 @@ synth-loop 不只是单请求路由器——对复杂任务，它是**多步相�
 
 ---
 
-## 七、项目结构
+## 七、项目结构与内核集成关系
+
+> **一句话**：synth-loop 自身是 `sl-py`。它以文件夹的形式集成两个内核——**ck（context_kernel）** 与 **pk（phase_kernel）**——sl 对它们做的是**文件夹级别的 vendored 集成**（即在 `sl-py/app/kernels/` 下保留一份副本，import 这份副本）。
 
 ```
 synth-loop/
-├── src/                   # 源码
-│   ├── app/               #   Python 包（main / routers / services / models / tools / middleware）
-│   │   ├── kernels/       #   vendored 内核组件（context_kernel / phase_kernel，纯副本热更新）
-│   │   └── services/      #   sl_llm_provider / gate_manager / inference_seam / kernel_adapters 等
-│   ├── public/            #   管理面板 HTML
-│   ├── data/              #   运行时 DB
-│   ├── config.yaml        #   服务配置
-│   ├── model_config.yaml  #   模型映射配置（llm_routing 多场景 = 唯一真源）
-│   └── complexity_rules.yaml # 复杂度规则
-├── deploy/                
-│   └── container/         #   Docker 镜像
-├── docs/                  
-│   ├── product_zh.md      #     产品文档
-│   ├── design_zh.md       #     架构设计
-│   └── api_zh.md          #     API 参考
-└── examples/              # 示例
+├── src/
+│   ├── sl-py/                       # ★ synth-loop 的python实现版本
+│   │   ├── app/                     #   Python 包（main / routers / services / models / tools / middleware）
+│   │   │   ├── kernels/             #   vendored 副本（sl 对 ck/pk 的文件夹级集成落点）
+│   │   │   │   ├── context_kernel/  #   ← ck 的 vendored 副本
+│   │   │   │   └── phase_kernel/    #   ← pk 的 vendored 副本
+│   │   │   └── services/            #   sl_llm_provider / gate_manager / inference_seam / kernel_adapters / longdata / sl_artifact_store 等
+│   │   ├── public/                  #   管理面板 HTML
+│   │   ├── data/                    #   运行时 DB
+│   │   ├── config.yaml              #   服务配置
+│   │   ├── model_config.yaml        #   模型映射配置（llm_routing 多场景 = 唯一真源）
+│   │   └── complexity_rules.yaml    #   复杂度规则
+│   └── ck-py/                       # ★ context_kernel 的python实现版本
+│       ├── context_kernel/          #   ck 核心源码（adapters / core / ports / serve）
+│       │   └── serve/               #   核心外挂服务（server.py + session_store.py） --可独立部署，是 ck 的「独立消费面」
+│       └── docs/                    #   ck 自身文档（ design /user-manual）
+├── deploy/
+│   └── container/                  #   Docker 镜像
+├── docs/
+│   ├── product_zh.md               #     产品文档
+│   ├── design_zh.md                #     架构设计
+│   └── api_zh.md                   #     API 参考
+└── examples/                       # 示例
 ```
+
+
 
 ---
 
@@ -203,6 +216,7 @@ synth-loop/
 | v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | ✅ 已发布 |
 | v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | ✅ 已发布 |
 | v0.1.2 | 相位推理（pk）+ 上下文内核（ck）+ 统一闸 + 三前置 + 主路径过闸 | ✅（_b 完成，104 测试通过） |
+| v0.1.2_c | 数据面内聚：双通道（临时区类型准入配置化 + 永久区 `/v1/longdata`）+ 链路 C 桥接（相位产物落 SQLite） | ✅（138 测试通过） |
 
 ---
 

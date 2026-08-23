@@ -7,7 +7,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import get_packets_settings
-from ..services.packet_store import PacketStore, VALID_PACKET_TYPES, get_packet_store
+from ..services.packet_store import (
+    PacketStore, get_valid_packet_types, get_packet_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ async def submit_packet(request: PacketSubmitRequest, http_request: Request):
         raise HTTPException(
             status_code=400,
             detail=f"Unknown packet type: '{request.type}'. "
-                   f"Valid types: {', '.join(sorted(VALID_PACKET_TYPES))}"
+                   f"Valid types: {', '.join(sorted(get_valid_packet_types()))}"
         )
 
     # 体积检查

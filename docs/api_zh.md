@@ -18,6 +18,7 @@
   - [SSE 流式响应](#sse-流式响应)
   - [健康检查](#健康检查)
   - [统一闸管理（v0.1.2_b）](#统一闸管理v012_b)
+  - [永久区数据面（v0.1.2_c）](#永久区数据面v012_c)
 - [内置工具](#内置工具)
 - [完整场景示例](#完整场景示例)
 - [内部接口参考](#内部接口参考)
@@ -37,6 +38,7 @@ synth-loop 提供与 OpenAI 和 Anthropic 完全兼容的 API，客户端只需�
 | OpenAI | `POST /v1/chat/completions` | `openai` Python/Node.js |
 | Anthropic | `POST /v1/messages` | `anthropic` Python/Node.js |
 | Packets | `POST /v1/packets` | HTTP JSON（上下文数据包提交） |
+| Longdata | `POST/DELETE/GET /v1/longdata` | HTTP JSON（永久区 doc/memory 引入/删除/列出，v0.1.2_c） |
 
 **Content-Type**: `application/json`
 
@@ -610,6 +612,68 @@ GET /health
 | `meta_gate` | `on`/`off`/`auto`——控制 ck 推理闸本身是否参与（on→auto park 可干预 / off→closed 直推） |
 
 **开闸行为**：当 `meta_gate` 为 `on`/`auto` 时，主路径与相位路径的上下文会被 ck park，chat 响应返回 `gate:"pending"` + `context_id`（见聊天补全的 `gate` 字段），可经 `GET/POST /chatgate/{context_id}`（ck 侧）peek/amend 干预后放行。
+
+---
+
+### 永久区数据面（v0.1.2_c 新增）
+
+> 数据面通道B（永久区）：doc/memory 引入到指定会话永久区。与临时区 packets（`/v1/packets`）对称但持久性不同——doc/memory 长期存在于永久区（`loaded_docs` / `permanent_system_prompt`），可被后续会话引用。类型仅 doc/memory 两类，写死。
+
+#### POST /v1/longdata
+
+引入 doc 或 memory 到指定会话永久区。
+
+**请求参数**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| session_id | string | 是 | 目标会话 id |
+| type | string | 是 | `doc`（文档）或 `memory`（记忆片段） |
+| content | string | 是 | 内容（通用文本处理：去首尾空白、压缩连续空行） |
+
+**响应**：
+
+```json
+{ "id": "ld_xxxx" }
+```
+
+- `type=doc` → 写入 `loaded_docs`（doc_id = 返回 id）
+- `type=memory` → 追加到 `permanent_system_prompt`，加 `<user-memory>` 包裹
+- `type` 非法或 content 空 → 400
+
+#### DELETE /v1/longdata/{id}
+
+按内部 id 删除永久区 longdata（需 `session_id` 双重校验，防跨会话误删）。
+
+**请求参数**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| id | string | 是 | 内部 id（POST 返回） |
+| session_id | string | 是 | 目标会话 id（校验归属） |
+
+**响应**：
+
+```json
+{ "deleted": true }
+```
+
+- id 不存在或 session_id 不匹配 → `{ "deleted": false }`
+
+#### GET /v1/longdata?session_id={id}
+
+列出会话永久区的 longdata。
+
+**响应**：
+
+```json
+{
+  "session_id": "s1",
+  "items": [
+    { "id": "ld_xxx", "session_id": "s1", "type": "doc", "content": "...", "created_at": 123 }
+  ]
+}
+```
 
 ---
 
@@ -1283,11 +1347,13 @@ packets:
   ttl_seconds: 1800                 # packet TTL（默认 30 分钟）
   max_packet_size_mb: 5             # 单 packet 最大体积
   max_packets_per_request: 20       # 单次请求最多引用的 packet 数
+  max_inline_data_per_request: 10   # 单次 inline_data 最大条数
+  types: [browser_structure, browser_dom, ...]   # v0.1.2_c：类型准入完整列表（空时回落内置默认）
 ```
 
 **模型多场景**（`model_config.yaml`，_b 唯一真源）：`llm_routing` 定义任意场景（chat/prompt_chat/task_chain/analysis/planning/summarize + 未来新增），`model_selector` 直接透传 service 到 `execution_router`——配置加场景即接通，无需改代码。`llm_gateway` 多网关注册默认关闭（`enabled=false`）。
 
 ---
 
-*文档版本：v1.1*
-*更新时间：2026-08-23 | v0.1.2_b：统一闸 /gate-manager + 开闸 pending + 相位标签触发（<tc-phase>/<tc-phase-chain>）+ 多场景模型配置*
+*文档版本：v1.2*
+*更新时间：2026-08-24 | v0.1.2_c：永久区数据面 /v1/longdata（doc/memory 引入/删除/列出）+ 类型准入进配置 packets.types*

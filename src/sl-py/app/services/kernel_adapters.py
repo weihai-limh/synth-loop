@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from .gate_manager import inject_kernels
 from .inference_seam import SlInferenceSeam
+from .sl_artifact_store import SlArtifactStore
 
 # ── vendored ck ──
 from ..kernels.context_kernel import ContextKernel, ContextPatch
@@ -73,6 +74,8 @@ class SlDataPlane:
     """ck DataPlane 适配器：适配 pk ArtifactStore（数据面）。
 
     P4：内存占位；Phase 5 接 pk ArtifactStore（phase_kernel.ports.ArtifactStore）。
+    _c：已核实 ck 内核 `data_plane` 只赋值未调用（context_kernel.py:40），**暂缓改造保留内存占位**；
+    未来 ck 数据面端口启用时再接真实存储。链路 C 产物桥接走独立的 `SlArtifactStore`（services/sl_artifact_store.py）。
     """
 
     def __init__(self, backend: Optional[Any] = None):
@@ -238,7 +241,7 @@ def build_phase_engine(
     engine = PhaseReasoningEngine(
         executor=LocalExecutor(),
         planner=MechanicalPlanner(),
-        artifact_store=InMemoryArtifactStore(),
+        artifact_store=SlArtifactStore(),   # _c: pk 产物落 sl SQLite（链路 C 桥接）
         inference_seam=seam,
         degraded_mode=degraded_mode,
         max_phase_depth=max_phase_depth,

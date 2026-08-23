@@ -17,22 +17,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTL = 24 * 3600  # 24h
 
 
-async def save_artifact(artifact_id: str, pipeline_id: str, kind: str,
-                        phase_index: int, content: dict, summary: str = "",
+async def save_artifact(artifact_id: str, pipeline_id: str = "",
+                        kind: str = "", phase_index: Optional[str] = None,
+                        content: Optional[Any] = None, summary: str = "",
                         ttl: Optional[int] = None) -> dict:
-    """保存产物（plan/path/result）"""
+    """保存产物（plan/path/result/summary）。
+
+    _c 放宽：artifact_id 唯一必填；pipeline_id/kind 可空；phase_index 支持 str
+    （存 phase_path 树路径如 "0-1"，写入 phase_index_txt 列）；content 支持 str 或 dict。
+    """
     from ..config import get_config
     config = get_config()
     ttl = ttl or config.get("artifacts", {}).get("ttl_seconds", DEFAULT_TTL)
     expires_at = int(time.time()) + ttl
 
+    # content 支持 str/dict/None → JSON 序列化（str 会包引号，get_artifact json.loads 还原）
     db = await get_shared_db()
     await db.execute(
         """INSERT OR REPLACE INTO artifacts
-           (artifact_id, pipeline_id, kind, phase_index, content, summary, expires_at)
+           (artifact_id, pipeline_id, kind, phase_index_txt, content, summary, expires_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (artifact_id, pipeline_id, kind, phase_index,
-         json.dumps(content, ensure_ascii=False), summary, expires_at),
+         json.dumps(content, ensure_ascii=False) if content is not None else None,
+         summary, expires_at),
     )
     await db.commit()
     return {"artifact_id": artifact_id, "kind": kind, "phase_index": phase_index}

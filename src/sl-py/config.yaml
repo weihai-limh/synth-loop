@@ -25,7 +25,7 @@ strata_match:
   cache_ttl: 3600
   mock: false  # 联调阶段使用真实服务
 
-# v0.5 新增配置段
+# system消息过滤
 upstream_filter:
   enabled: true
   char_threshold: 5000  # system消息超过此字符数触发过滤
@@ -50,25 +50,25 @@ job_store:
 
 textcli:
   endpoints:
-    - url: "http://10.168.1.151/text-cli/cli"
+    - url: "http://127.0.0.1:28050/text-cli/cli"
       name: "本机"
       capabilities: ["基础", "密钥", "IM", "Git", "防火墙", "NAS"]
-  default_endpoint: "http://10.168.1.151/text-cli/cli"
+  default_endpoint: "http://127.0.0.1:28050/text-cli/cli"
   timeout: 10
 
-# _a P2.1: 运行时表（tc 消费链路配置面）——旧 textcli.endpoints 配置迁移至此
+# _a P2.1: 运行时表（tc 消费链路配置面）
 runtime_endpoints:
   enabled: true
   default_alias: "home-service"   # 全局默认端点（指令优先语义：无 alias/未知 alias 兜底）
   seeds:
     - alias: "home-service"
       kind: "runtime"
-      url: "http://10.168.1.151/text-cli/cli"
+      url: "http://127.0.0.1:28050/text-cli/cli"
       auth: "none"                # 内网匿名
       rank: 1
     - alias: "cloud-endpoint"
       kind: "endpoint"
-      url: "https://tide.agentbot.space/text-cli/cli"
+      url: "https://127.0.0.1:29050/text-cli/cli"
       auth: "dual"
       access_token: "${TIDE_ACCESS_TOKEN}"
       service_token: "${TIDE_SERVICE_TOKEN}"
@@ -112,6 +112,20 @@ packets:
   max_packet_size_mb: 5             # 单 packet 最大体积
   max_packets_per_request: 20       # 单次 /chat/completions 最多引用的 packet 数
   max_inline_data_per_request: 10   # 单次 inline_data 最大条数
+  types:                            # _c: 类型准入完整列表（空时回落内置默认）
+    - browser_structure
+    - browser_dom
+    - browser_meta
+    - browser_selection
+    - browser_audio
+    - wechat_context
+    - im_thread
+    - im_message_history
+    - packet_consent
+    - aiot_sensor
+    - device_status
+    - rpi_sensor
+    - camera_frame
 
 # _a P4.3: 相位产物数据面
 artifacts:

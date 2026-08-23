@@ -13,7 +13,8 @@ from ..config import get_packets_settings
 logger = logging.getLogger(__name__)
 
 # ── type 注册表（权威真源: functional_design/packets-api.md §4.2） ──
-VALID_PACKET_TYPES: set[str] = {
+# _c: 类型准入改配置驱动（config.yaml packets.types 完整列表）；此处保留内置默认（空配置回落）
+DEFAULT_PACKET_TYPES: set[str] = {
     # chrome-plugin
     "browser_structure",
     "browser_dom",
@@ -33,6 +34,17 @@ VALID_PACKET_TYPES: set[str] = {
     "rpi_sensor",
     "camera_frame",
 }
+
+# 兼容别名（packets.py 曾 import VALID_PACKET_TYPES）；实际准入用 get_valid_packet_types()
+VALID_PACKET_TYPES: set[str] = DEFAULT_PACKET_TYPES
+
+
+def get_valid_packet_types() -> set[str]:
+    """类型准入：读 config.yaml packets.types（完整列表）；空配置回落内置默认（向后兼容）。"""
+    types = get_packets_settings().types
+    if types:
+        return set(types)
+    return DEFAULT_PACKET_TYPES
 
 
 @dataclass
@@ -110,8 +122,8 @@ class PacketStore:
 
     @staticmethod
     def validate_type(ptype: str) -> bool:
-        """校验 packet type 是否在注册表中"""
-        return ptype in VALID_PACKET_TYPES
+        """校验 packet type 是否在类型准入列表中（配置驱动，空配置回落内置默认）"""
+        return ptype in get_valid_packet_types()
 
     @property
     def size(self) -> int:
