@@ -1081,6 +1081,67 @@ curl http://localhost:13155/v1/messages \
 }
 ```
 
+### 场景 6：相位多轮推理（v0.1.2）
+
+> 相位由 **XML 标签**显式锁定触发：`<tc-phase>`（结构分形 structural）/ `<tc-phase-chain>`（链式分形 chain）。首轮带标签 → 返回 `synth_pipeline`（待规划确认）；后续轮原样回传 `synth_pipeline: {id, action}` 逐相位推进。
+
+**第 1 轮（首轮触发，结构分形）**：
+
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-v4-flash",
+    "messages": [{"role": "user", "content": "<tc-phase>帮我完成一份智能家居项目市场调研报告</tc-phase>"}]
+  }'
+```
+
+**第 1 轮响应**（`awaiting_plan_confirm`，回传 `synth_pipeline.id` 继续）：
+
+```json
+{
+  "id": "chatcmpl-phase-a1b2c3d4",
+  "object": "chat.completion",
+  "model": "deepseek-v4-flash",
+  "choices": [{"index": 0, "message": {"role": "assistant",
+    "content": "相位规划如下（共 3 个相位）：\n1. 市场分析\n2. 竞品调研\n3. 报告撰写\n\n请确认（回传 action=confirm）..."}, "finish_reason": "stop"}],
+  "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+  "synth_pipeline": {
+    "id": "p1", "step": "awaiting_plan_confirm",
+    "phase_index": 0, "phase_total": 3, "artifact_ref": null
+  }
+}
+```
+
+**第 2 轮（确认规划 → 生成路径）**：
+
+```bash
+curl http://localhost:13155/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-synthloop-session-id: <上轮响应 Header 的 session-id>" \
+  -d '{
+    "model": "deepseek-v4-flash",
+    "messages": [{"role": "user", "content": "确认"}],
+    "synth_pipeline": {"id": "p1", "action": "confirm"}
+  }'
+```
+
+**第 2 轮响应**（`awaiting_path_confirm`，路径确认）：
+
+```json
+{
+  "id": "chatcmpl-phase-a1b2c3d4",
+  "choices": [{"index": 0, "message": {"role": "assistant",
+    "content": "第一个相位路径：市场分析（分析目标市场、规模与增长）..."}, "finish_reason": "stop"}],
+  "synth_pipeline": {"id": "p1", "step": "awaiting_path_confirm",
+    "phase_index": 0, "phase_total": 3, "artifact_ref": "art_p1_result_0"}
+}
+```
+
+**第 3 轮（确认路径 → 执行相位，经推理缝 LLM）**：回传 `{"id": "p1", "action": "confirm"}` → 执行当前相位（normal routing）→ 推进下一相位。逐相位 confirm，直至 `step: "completed"`。
+
+> 链式分形同理，仅触发标签改为 `<tc-phase-chain>`（子相位直接出 path，钳制深度）。执行经推理缝 LLM（非 text-cli）；相位上下文可被 ck 闸监听/优化（开闸时）。
+
 ---
 
 ## 内部接口参考
