@@ -1,10 +1,11 @@
 """数据库连接与初始化模块"""
 
+import asyncio
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import aiosqlite
 
@@ -27,6 +28,41 @@ async def get_shared_db() -> aiosqlite.Connection:
         logger = logging.getLogger(__name__)
         logger.info(f"Shared DB connection opened: {db_path}")
     return _db_connection
+
+
+# ═══════════════════════════════════════════════════════════
+# v0_1_2_d (B0): 写入串行化封装
+# 单共享连接下，多个并发写必须串行提交，避免 SQLite 锁冲突 /
+# 跨 await 复用错误。模块级锁保证「一个写事务完整提交前，另一个不开始」。
+# ⚠ 注意：本 Phase 仅引入封装，运行期调用点收敛在 Phase 2 (B1)。
+# ═══════════════════════════════════════════════════════════
+_write_lock = asyncio.Lock()
+
+
+async def execute_write(db: aiosqlite.Connection, sql: str, params: tuple = ()) -> aiosqlite.Cursor:
+    """写操作统一入口：持 _write_lock，保证一个写事务完整提交前另一个不开始。"""
+    async with _write_lock:
+        cur = await db.execute(sql, params)
+        await db.commit()
+        return cur
+
+
+async def execute_read(db: aiosqlite.Connection, sql: str, params: tuple = ()) -> aiosqlite.Cursor:
+    """读操作：不持写锁（SQLite 多读单写，读间可并发）。"""
+    return await db.execute(sql, params)
+
+
+async def write_transaction(
+    db: aiosqlite.Connection, coro: Callable[[], Awaitable[Any]]
+) -> Any:
+    """复合写包裹器：在持锁范围内跑「读-改-写」协程并统一 commit。
+    用于含中间 await 的复合操作（如 update_user / cleanup_expired_sessions /
+    create_user），避免锁外交错导致跨 await 复用错误。
+    Phase 2 (B1) 收敛时这些复合写函数须包进本包裹器。"""
+    async with _write_lock:
+        result = await coro()
+        await db.commit()
+        return result
 
 
 async def close_shared_db() -> None:
@@ -312,6 +348,7 @@ async def delete_session_snapshot(session_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+# v0_1_2_d (B0 标注): 复合写（先查过期 → 删）。Phase 2 (B1) 收敛时须包进 write_transaction。
 async def cleanup_expired_sessions(expire_days: int) -> int:
     """清理过期会话"""
     db_path = get_db_path()
@@ -356,6 +393,7 @@ async def get_task(task_id: str) -> dict[str, Any] | None:
 # v0_1_1 Phase 3: users 表 CRUD
 # ═══════════════════════════════════════════════════════════
 
+# v0_1_2_d (B0 标注): 复合写（先插 → 查回）。Phase 2 (B1) 收敛时须包进 write_transaction。
 async def create_user(user_id: str, display_name: str = "", enabled: bool = True) -> dict[str, Any]:
     """创建用户"""
     db_path = get_db_path()
@@ -394,6 +432,7 @@ async def list_users() -> list[dict[str, Any]]:
         return [dict(row) for row in await cursor.fetchall()]
 
 
+# v0_1_2_d (B0 标注): 复合写（多步 UPDATE + 逐行 rowcount 判断）。Phase 2 (B1) 收敛时须包进 write_transaction。
 async def update_user(user_id: str, enabled: bool | None = None, display_name: str | None = None) -> bool:
     """更新用户（启用/禁用 或 改名）"""
     db_path = get_db_path()
