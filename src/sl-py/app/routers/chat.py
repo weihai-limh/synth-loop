@@ -29,7 +29,6 @@ from ..services.context_compressor import ContextCompressor
 from ..services.streaming_handler import StreamingHandler
 from ..services.execution_router import get_execution_router
 from ..services.context_manager import MANAGE_CONTEXT_DEFINITION, handle_manage_context
-from ..services.task_chain_executor import TaskChainExecutor
 from ..tools import (
     LOAD_DOCUMENT_DEFINITION,
     SELECT_SYSTEM_PROMPT_DEFINITION,
@@ -62,14 +61,13 @@ model_selector: ModelSelector
 context_compressor: ContextCompressor
 system_prompt_builder: SystemPromptBuilder
 streaming_handler: StreamingHandler
-task_chain_executor: TaskChainExecutor
 
 
 def init_services() -> None:
     """初始化服务实例"""
     global session_manager, context_router, tool_dispatcher, downstream_llm, db_writer
     global complexity_classifier, logic_abstractor, model_selector, context_compressor
-    global system_prompt_builder, streaming_handler, task_chain_executor
+    global system_prompt_builder, streaming_handler
 
     session_manager = SessionManager()
     context_router = ContextRouter()
@@ -138,9 +136,6 @@ def init_services() -> None:
     context_compressor = ContextCompressor()
     system_prompt_builder = SystemPromptBuilder()
     streaming_handler = StreamingHandler()
-
-    # Phase 4: 任务链执行器
-    task_chain_executor = TaskChainExecutor()
 
     # Phase 4: 注册 manage_context 工具
     tool_dispatcher.register(
@@ -461,53 +456,30 @@ async def _handle_prompt_chat_level(request, session, user_text, complexity, log
 
 
 async def _handle_task_chain_placeholder(request, session, user_text, logic_category, current_user_content, client_system_messages, api_key):
-    """task_chain 实际执行（v0_1_1: 语言保持 prompt 注入）"""
-    if not session.permanent_system_prompt:
-        await first_turn_prompt_selection(session, user_text)
+    """task_chain 路由入口（v0_1_2_d #6 红线：旧 TaskChainExecutor 已删除）。
 
-    # v0_1_1: 语言保持 prompt 注入（临时追加到 session，executor 内部读取）
-    _original_prompt = session.permanent_system_prompt
-    session.permanent_system_prompt = f"{LANGUAGE_KEEP_PROMPT}\n\n{_original_prompt}" if _original_prompt else LANGUAGE_KEEP_PROMPT
-
-    strata_match_client = get_strata_match_client()
-    chain_result = await task_chain_executor.execute(
-        user_ask=user_text,
-        session=session,
-        downstream_llm=downstream_llm,
-        context_router=context_router,
-        tool_dispatcher=tool_dispatcher,
-        strata_match_client=strata_match_client,
-        model_selector=model_selector,
-        logic_category=logic_category,
-        api_key=api_key,
-        max_tokens=request.max_tokens or 4096,
+    Phase 4 占位：仅保留路由外壳，不调用任何旧执行器；真实执行由 Phase 8
+    新 TaskChainService 接入。M4 前返回显式"暂未启用"，避免路由悬空。
+    """
+    logger.warning(
+        f"task_chain dispatch received but TaskChainService not yet wired (Phase 8 pending): "
+        f"session={session.session_id}, logic_category={logic_category}"
     )
-
-    # 构建响应
-    summary = chain_result.get("summary", "")
-    steps_text = "\n".join(
-        f"{'✅' if s['status']=='completed' else '❌'} Step {s['step_num']}: {s['step_name']}"
-        for s in chain_result.get("steps", [])
-    )
-    if chain_result.get("failed"):
-        summary += f"\n\n⚠ Task chain failed at step {chain_result['failed_at_step']}."
-        if chain_result.get("pending_steps"):
-            summary += f"\nPending steps: {', '.join(chain_result['pending_steps'])}"
-
     response = {
-        "id": f"chain-{chain_result['chain_id']}",
+        "id": f"chain-{session.session_id}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": request.model or "task-chain",
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": f"{steps_text}\n\n{summary}"},
+            "message": {
+                "role": "assistant",
+                "content": "⚠ task_chain 执行器已在 v0_1_2_d 重构中移除，新的 TaskChainService 将于 Phase 8 接入。当前暂未启用。",
+            },
             "finish_reason": "stop",
         }],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
-    session.increment_round()
-    session.permanent_system_prompt = _original_prompt  # v0_1_1: 恢复原始 prompt
     return JSONResponse(content=response)
 
 
