@@ -13,6 +13,15 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+def _load_subtype_names(rules_path: Path) -> set[str]:
+    """从 complexity_rules.yaml 的 subtypes 段读取合法枚举名（真源）"""
+    if not rules_path.exists():
+        return set()
+    with open(rules_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return {item.get("name") for item in data.get("subtypes", []) or [] if item.get("name")}
+
+
 class EndpointConfig:
     """端点配置"""
 
@@ -54,6 +63,7 @@ class ExecutionRouter:
     def __init__(self, config_path: Optional[str] = None):
         self._endpoints: dict[str, EndpointConfig] = {}
         self._routings: dict[str, ServiceRouting] = {}
+        self._logic_routings: dict[str, ServiceRouting] = {}
         if config_path:
             self.load_config(config_path)
 
@@ -82,6 +92,23 @@ class ExecutionRouter:
         }
         logger.info(f"Loaded {len(self._routings)} service routings: {list(self._routings.keys())}")
 
+        # v0_1_2_d (B3): 加载 logic_category 细分路由（key ⊆ complexity_rules.yaml subtypes[].name）
+        rules_path = path.parent / "complexity_rules.yaml"
+        valid_subtypes = _load_subtype_names(rules_path)
+        logic_raw = config.get("logic_categories", {})
+        if logic_raw:
+            self._logic_routings = {
+                name: ServiceRouting(name, cfg, self._endpoints)
+                for name, cfg in logic_raw.items()
+            }
+            # 枚举校验：logic_categories 的 key 必须是 subtypes 真源子集
+            unknown = set(self._logic_routings.keys()) - valid_subtypes
+            if unknown:
+                raise ValueError(
+                    f"logic_categories 含未知 subtype（不在 complexity_rules.yaml subtypes 真源中）: {unknown}"
+                )
+            logger.info(f"Loaded {len(self._logic_routings)} logic_category routings: {list(self._logic_routings.keys())}")
+
     def get_routing(self, service_name: str) -> Optional[ServiceRouting]:
         """获取指定 service 的路由配置"""
         return self._routings.get(service_name)
@@ -89,6 +116,30 @@ class ExecutionRouter:
     def get_endpoint(self, endpoint_name: str) -> Optional[EndpointConfig]:
         """获取指定端点配置"""
         return self._endpoints.get(endpoint_name)
+
+    def get_logic_routing(self, logic_category: str) -> Optional[ServiceRouting]:
+        """获取指定 logic_category 的路由配置"""
+        return self._logic_routings.get(logic_category)
+
+    def resolve_logic_endpoint(self, logic_category: str, level: str = "primary") -> tuple[Optional[EndpointConfig], str]:
+        """
+        v0_1_2_d (B3): 按 logic_category 直查细分路由。
+        - 返回 (EndpointConfig, model_name)；未配置该 logic_category 时返回 (None, "")
+        - 命中意味着 logic_category 维度优先于 service 维度
+        """
+        routing = self.get_logic_routing(logic_category)
+        if not routing:
+            return None, ""
+        level_attr = getattr(routing, level, None)
+        if level_attr and level_attr.endpoint:
+            return level_attr.endpoint, level_attr.model
+        if level == "primary" and routing.fallback.endpoint:
+            logger.warning(f"Primary endpoint not available for logic '{logic_category}', fallback to fallback")
+            return routing.fallback.endpoint, routing.fallback.model
+        elif level in ("primary", "fallback") and routing.degradation.endpoint:
+            logger.warning(f"Falling back to degradation for logic '{logic_category}'")
+            return routing.degradation.endpoint, routing.degradation.model
+        return None, ""
 
     def resolve_endpoint(self, service_name: str, level: str = "primary") -> tuple[Optional[EndpointConfig], str]:
         """

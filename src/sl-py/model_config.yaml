@@ -82,6 +82,80 @@ llm_routing:
       endpoint: "local_model"
       model: "qwen2.5:1.5b"
 
+# v0_1_2_d (B3): logic_category 细分路由（key ⊆ complexity_rules.yaml subtypes[].name）
+# 结构同 llm_routing 下 service 扁平 dict；命中时按 logic_category 直查，未命中回落 service 默认。
+logic_categories:
+  document_writing:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:7b"
+  code_generation:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4.7-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:7b"
+  code_review:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4.7-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:7b"
+  creative_writing:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:1.5b"
+  data_analysis:
+    primary:
+      endpoint: "aggregation_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:1.5b"
+  design_generation:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:1.5b"
+  translation:
+    primary:
+      endpoint: "main_gateway"
+      model: "deepseek-v4-flash"
+    fallback:
+      endpoint: "backup_gateway"
+      model: "GLM-4-Flash"
+    degradation:
+      endpoint: "local_model"
+      model: "qwen2.5:1.5b"
+
 # _a P3: 多 LLM 网关注册表（独立配置面，enabled=false 默认零影响）
 llm_gateway:
   enabled: false

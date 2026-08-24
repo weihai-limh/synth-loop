@@ -18,21 +18,29 @@ class ModelSelector:
 
     def select(self, service: str, logic_category: Optional[str] = None) -> tuple[Optional[str], str]:
         """
-        直接透传 service 给 execution_router（_b P5.2 修复：llm_routing 配置为唯一真源）。
+        基于 service + logic_category 选择模型。
 
-        移除硬编码 service_map 白名单——此前它截断未列出的 service（回落 chat），
-        导致多模型多场景配置机制无法扩展。现在任意 service 名都透传到 execution_router，
-        从 llm_routing 配置读取；未配置的 service（如 normal）由 execution_router 自动
-        回落 chat（其 L99-102 fallback 机制），无需白名单。
+        v0_1_2_d (B3): logic_category 命中 → 直查 logic_categories 细分路由（优先）；
+        未命中（None / 未知 logic_category）→ 回落 service 默认路由。
+        移除硬编码 service_map 白名单——llm_routing 配置为唯一真源。
 
         Args:
             service: 服务场景名（chat / prompt_chat / task_chain / analysis /
                      planning / summarize / normal / 未来新增场景）
-            logic_category: subtype（可选，未来精细化选择的预留维度，当前不参与）
+            logic_category: subtype（document_writing / code_generation / ...），
+                            命中时优先于 service 维度
 
         Returns:
             (endpoint_name, model_name)
         """
+        # 1. logic_category 直查（命中优先）
+        if logic_category:
+            endpoint, model = self._router.resolve_logic_endpoint(logic_category, "primary")
+            if endpoint is not None:
+                return endpoint.name, model
+            logger.info(f"ModelSelector: logic_category '{logic_category}' 未配置，回落 service '{service}'")
+
+        # 2. 回落 service 默认路由
         endpoint, model = self._router.resolve_endpoint(service, "primary")
         if endpoint is None:
             logger.error(f"ModelSelector: no endpoint for service '{service}'")

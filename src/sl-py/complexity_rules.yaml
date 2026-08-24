@@ -22,3 +22,69 @@ rules:
       - "先.*然后"
       - "然后.*最后"
       - "分析并.*生成"
+
+# v0_1_2_d (B3): logic_category 外置词表 + 枚举真源
+# 既当 matching 词表（logic_abstractor 逐条 re.search），又当枚举真源
+# （model_config.yaml 的 logic_categories key 必须 ⊆ 此处 name）。
+subtypes:
+  - name: document_writing
+    keywords:
+      - "写"
+      - "报告"
+      - "计划书"
+      - "文档"
+      - "文章"
+      - "方案"
+      - "策划"
+      - "撰写"
+      - "编写"
+      - "起草"
+  - name: code_generation
+    keywords:
+      - "代码"
+      - "编程"
+      - "开发"
+      - "函数"
+      - "类"
+      - "算法"
+      - "python"
+      - "java"
+      - "javascript"
+      - "写一个"
+  - name: code_review
+    keywords:
+      - "审查"
+      - "review"
+      - "优化.*代码"
+      - "重构"
+      - "code review"
+  - name: creative_writing
+    keywords:
+      - "故事"
+      - "小说"
+      - "诗歌"
+      - "创意"
+      - "情节"
+      - "角色"
+  - name: data_analysis
+    keywords:
+      - "分析.*数据"
+      - "统计"
+      - "图表"
+      - "趋势"
+      - "报表"
+      - "指标"
+  - name: design_generation
+    keywords:
+      - "设计"
+      - "UI"
+      - "界面"
+      - "海报"
+      - "logo"
+      - "插图"
+  - name: translation
+    keywords:
+      - "翻译"
+      - "translate"
+      - "译成"
+      - "转换.*语言"

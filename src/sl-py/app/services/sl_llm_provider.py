@@ -56,14 +56,24 @@ class SlLlmProvider:
 
     # ── 通用 service 选择 ──
 
-    def select_model(self, service: Optional[str]) -> tuple[Optional[str], str]:
+    def select_model(
+        self, service: Optional[str], logic_category: Optional[str] = None
+    ) -> tuple[Optional[str], str]:
         """service（complexity 或 routing）→ (endpoint_name, model)。
+
+        v0_1_2_d (B3): 支持可选 logic_category（subtype）参与路由；
+        命中逻辑细分时优先于 service 维度，未命中回落 service 默认。
+        解析失败（未知 logic_category）→ selector 内部告警并回落，等价于落 general_qa。
 
         - 相位 routing：planning / summarize / normal（normal→chat 主力默认，P2）
         - 主路径 complexity：chat / prompt_chat / task_chain / ...
         - None → chat 默认
         """
-        return self._selector.select(service or "chat")
+        try:
+            return self._selector.select(service or "chat", logic_category)
+        except Exception as e:
+            logger.error(f"sl_llm_provider: model select failed (service={service}, logic={logic_category}): {e}; 回落 chat")
+            return self._selector.select("chat")
 
     # ── async 唯一推理落点 ──
 
