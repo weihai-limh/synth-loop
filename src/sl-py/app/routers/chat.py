@@ -744,55 +744,73 @@ FRACTAL_ROUTE_MAP = {
 ASYNC_LEVELS = {"d", "e"}
 
 
-async def _delegate_to_textcli(user_text: str, session, level: str, plan_step: dict = None) -> JSONResponse:
-    """v0_1_2: 委托 text-cli --async 执行，不再空转"""
-    from ..config import get_config
-    from ..database import get_shared_db
+async def _delegate_via_async_service(user_text: str, session, level: str) -> JSONResponse:
+    """v0_1_2_d (M1): 统一经 AsyncDelegationService 委托 text-cli --async。
 
-    cfg = get_config()
-    textcli_cfg = cfg.get("tools", {}).get("textcli", {})
-    textcli_url = textcli_cfg.get("default_endpoint", "http://localhost:28050/text-cli/cli")
+    废弃旧 _delegate_to_textcli 自建 httpx 实现（G3 闭环：写 tasks 表责任转移至
+    Phase 8 新 TaskChainService，本 Phase 仅删除旧实现，不在此处写表，避免真空）。
+    桥接：把 user_text/level 转成 path_json 最小信封 → delegate → poll → 回写响应。
+    """
+    from ..services.async_delegation import AsyncDelegationService
 
-    # 调 text-cli --async 获取 task_id
-    text_cli_task_id = None
+    # 最小信封（路径级），与 text-cli --async 协议对齐
+    path_json = {
+        "prompt": user_text,
+        "level": level,
+        "session_id": session.session_id,
+        "mode": "async",
+    }
+
+    service = AsyncDelegationService()
+    # [委托] 结构化日志（含 task_id / 阶段标记，为后续闸留观测基础）
+    logger.info(f"[M1-DELEGATE] level={level} session={session.session_id} delegating to text-cli")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                textcli_url,
-                json={"prompt": f"AI:--async {user_text}", "plan_step": plan_step},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            text_cli_task_id = data.get("task_id", data.get("id"))
-    except Exception as e:
-        logger.warning(f"_delegate_to_textcli failed for text-cli: {e}")
-        text_cli_task_id = None
-
-    # synth-loop tasks 表降为管道级日志
-    task_id = f"Task-{uuid4().hex[:8]}-synthloop"
-    try:
-        db = await get_shared_db()
-        await db.execute(
-            """INSERT INTO tasks (id, session_id, user_id, input, status, result, created_at, updated_at)
-               VALUES (?, ?, ?, ?, 'queued', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-            (task_id, session.session_id, getattr(session, 'user_id', None), user_text,
-             json.dumps({"text_cli_task_id": text_cli_task_id}) if text_cli_task_id else None),
+        text_cli_task_id = await service.delegate_to_textcli(
+            step_name=f"fractal-{level}", path_json=path_json
         )
-        await db.commit()
+        logger.info(f"[M1-DELEGATE] ok task_id={text_cli_task_id} level={level}")
     except Exception as e:
-        logger.warning(f"Failed to log pipeline task: {e}")
+        logger.error(f"[M1-DELEGATE] failed level={level} session={session.session_id}: {e}")
+        return JSONResponse(status_code=502, content={
+            "id": f"async-err-{uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": f"fractal-{level}",
+            "choices": [{"index": 0, "message": {"role": "assistant",
+                "content": f"⚠ 异步委托失败：{e}"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        })
 
-    logger.info(f"Async delegated to text-cli: synth_task={task_id}, text_cli_task={text_cli_task_id}, level={level}")
+    # [轮询] 结构化日志
+    logger.info(f"[M1-POLL] task_id={text_cli_task_id} level={level} polling...")
+    try:
+        result_data = await service.poll_textcli_task(text_cli_task_id)
+        logger.info(f"[M1-POLL] ok task_id={text_cli_task_id} level={level}")
+    except Exception as e:
+        logger.error(f"[M1-POLL] failed task_id={text_cli_task_id} level={level}: {e}")
+        return JSONResponse(status_code=504, content={
+            "id": f"async-poll-{uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": f"fractal-{level}",
+            "choices": [{"index": 0, "message": {"role": "assistant",
+                "content": f"⚠ 异步任务轮询失败：{e}"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        })
+
+    # [回写] 结构化日志 + 响应构造
+    logger.info(f"[M1-WRITE-BACK] task_id={text_cli_task_id} level={level} building response")
     template = "The asynchronous task opening code is as follows: {task_id}."
-    content = template.format(task_id=text_cli_task_id or task_id)
+    content = template.format(task_id=text_cli_task_id)
     return JSONResponse(content={
-        "id": f"async-{task_id}",
+        "id": f"async-{text_cli_task_id}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": f"fractal-{level}",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "_text_cli_task_id": text_cli_task_id,
+        "_result": result_data,
     })
 
 
@@ -855,7 +873,8 @@ async def _handle_fractal_dispatch(request, session, user_text, logic_category,
                         "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 })
-            return await _delegate_to_textcli(user_text, session, level)
+            # v0_1_2_d (M1): 统一经 AsyncDelegationService，废弃旧 _delegate_to_textcli 自建 httpx
+            return await _delegate_via_async_service(user_text, session, level)
 
         # 同步路由
         route = FRACTAL_ROUTE_MAP.get(level, "strata_match")
