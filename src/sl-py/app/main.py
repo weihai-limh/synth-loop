@@ -67,7 +67,6 @@ def create_app() -> FastAPI:
     app.include_router(admin.router)
     app.include_router(tasks.router)
     app.include_router(packets.router)  # v0_1_1 Phase 6: packets API
-    app.include_router(pipeline.router)  # v0_1_2 Phase 4: pipeline API
     app.include_router(runtime_endpoints.router)  # _a P2.1: 运行时表管理 API
     app.include_router(artifacts.router)  # _a P4.3: 数据面下行（相位产物）
     app.include_router(gate.router)  # _b P3: 统一闸 gate_manager HTTP 钩子面

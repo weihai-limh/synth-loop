@@ -11,7 +11,6 @@ import logging
 from typing import Any, Optional
 
 from ..models.pipeline import PipelineSession, PhaseDefinition, PhaseStatus
-from .phase_executor import PhaseExecutor
 from .textcli_enhanced_client import EnhancedTextCliClient, TextCLITaskError, get_enhanced_client
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,6 @@ class AsyncDelegationService:
 
     def __init__(self, client: Optional[EnhancedTextCliClient] = None):
         self.client = client or get_enhanced_client()  # 注入强化客户端（不再自建 httpx）
-        self.phase_executor = PhaseExecutor()
 
     async def delegate_to_textcli(self, step_name: str, path_json: dict,
                                   alias: Optional[str] = None) -> str:
@@ -48,22 +46,5 @@ class AsyncDelegationService:
             raise TextCLITaskError(task_id=task_id, detail=result.rst_err)
         return result.data
 
-    # ═══════════════════════════════════════════════════════════
-    # 相位执行编排（chat 驱动——见 phase_chat_orchestrator）
-    # ═══════════════════════════════════════════════════════════
-
-    async def execute_phase(self, pipeline: PipelineSession, phase: PhaseDefinition,
-                            path_json: dict) -> PhaseStatus:
-        """执行单相位（短任务同步 / 长任务 --async，R4 分级由调用方决策）"""
-        phase.status = PhaseStatus.RUNNING
-        try:
-            task_id = await self.delegate_to_textcli(phase.name, path_json,
-                                                     alias=getattr(phase, "endpoint_alias", None))
-            result_data = await self.poll_textcli_task(task_id)
-            await self.phase_executor.confirm_path(pipeline, phase.index, confirmed=True)
-            phase.status = PhaseStatus.COMPLETED
-            return PhaseStatus.COMPLETED
-        except Exception as e:
-            logger.error(f"Phase {phase.index} execution failed: {e}")
-            phase.status = PhaseStatus.FAILED
-            return PhaseStatus.FAILED
+    # v0_1_2_d (M3): 旧 PhaseExecutor 依赖已剥离——execute_phase / confirm_path 旧相位编排
+    # 随 phase_executor.py 删除一并移除；T8 相位执行改由 TaskChainService（M4）统一驱动。

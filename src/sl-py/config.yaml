@@ -102,7 +102,7 @@ session_memory:
   enabled: true        # 是否启用 <user-memory> 标签提取
 
 async_tasks:
-  enabled: false       # 服务级异步能力开关。v0_1_1 默认 false（骨架），v0.2 默认 true
+  enabled: true        # v0_1_2_d (M2): 打开服务级异步能力开关，text-cli 端点 127.0.0.1:28050 可达时不报错
   max_per_user: 3      # 每个用户最多同时运行的异步任务数（仅 enabled=true 时生效）
 
 # ── packets API（v0_1_1 新增） ──
