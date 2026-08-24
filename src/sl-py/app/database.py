@@ -285,45 +285,42 @@ async def save_session_snapshot(
     last_logic_category: str | None = None,
 ) -> None:
     """保存或更新会话快照（v0.5 新增字段）"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            """
-            INSERT OR REPLACE INTO session_snapshots 
-            (session_id, permanent_system_prompt, loaded_docs_json, last_interaction_json, last_active_time,
-             downstream_session_id, active_job_id, active_chain_id, last_complexity, last_logic_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                session_id,
-                permanent_system_prompt,
-                json.dumps(loaded_docs, ensure_ascii=False),
-                json.dumps(last_interaction, ensure_ascii=False),
-                last_active_time.isoformat(),
-                downstream_session_id,
-                active_job_id,
-                active_chain_id,
-                last_complexity,
-                last_logic_category,
-            ),
-        )
-        await db.commit()
+    db = await get_shared_db()
+    await execute_write(
+        db,
+        """
+        INSERT OR REPLACE INTO session_snapshots 
+        (session_id, permanent_system_prompt, loaded_docs_json, last_interaction_json, last_active_time,
+         downstream_session_id, active_job_id, active_chain_id, last_complexity, last_logic_category)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            session_id,
+            permanent_system_prompt,
+            json.dumps(loaded_docs, ensure_ascii=False),
+            json.dumps(last_interaction, ensure_ascii=False),
+            last_active_time.isoformat(),
+            downstream_session_id,
+            active_job_id,
+            active_chain_id,
+            last_complexity,
+            last_logic_category,
+        ),
+    )
 
 
 async def load_session_snapshot(session_id: str) -> dict[str, Any] | None:
     """加载会话快照"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM session_snapshots WHERE session_id = ?", (session_id,)
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
+    db = await get_shared_db()
+    cursor = await execute_read(
+        db, "SELECT * FROM session_snapshots WHERE session_id = ?", (session_id,)
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
 
-        return {
-            "session_id": row["session_id"],
+    return {
+        "session_id": row["session_id"],
             "permanent_system_prompt": row["permanent_system_prompt"],
             "loaded_docs_json": json.loads(row["loaded_docs_json"]),
             "last_interaction_json": json.loads(row["last_interaction_json"]),
@@ -339,38 +336,34 @@ async def load_session_snapshot(session_id: str) -> dict[str, Any] | None:
 
 async def delete_session_snapshot(session_id: str) -> bool:
     """删除会话快照"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            "DELETE FROM session_snapshots WHERE session_id = ?", (session_id,)
-        )
-        await db.commit()
-        return cursor.rowcount > 0
+    db = await get_shared_db()
+    cursor = await execute_write(
+        db, "DELETE FROM session_snapshots WHERE session_id = ?", (session_id,)
+    )
+    return cursor.rowcount > 0
 
 
-# v0_1_2_d (B0 标注): 复合写（先查过期 → 删）。Phase 2 (B1) 收敛时须包进 write_transaction。
+# v0_1_2_d (B0 标注): 单步 DELETE（行内 datetime 计算，无中间 await）。用 execute_write。
 async def cleanup_expired_sessions(expire_days: int) -> int:
     """清理过期会话"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            """
-            DELETE FROM session_snapshots 
-            WHERE last_active_time < datetime('now', ? || ' days')
-        """,
-            (f"-{expire_days}",),
-        )
-        await db.commit()
-        return cursor.rowcount
+    db = await get_shared_db()
+    cursor = await execute_write(
+        db,
+        """
+        DELETE FROM session_snapshots 
+        WHERE last_active_time < datetime('now', ? || ' days')
+    """,
+        (f"-{expire_days}",),
+    )
+    return cursor.rowcount
 
 
 async def get_active_session_count() -> int:
     """获取活跃会话数量"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute("SELECT COUNT(*) FROM session_snapshots")
-        row = await cursor.fetchone()
-        return row[0] if row else 0
+    db = await get_shared_db()
+    cursor = await execute_read(db, "SELECT COUNT(*) FROM session_snapshots")
+    row = await cursor.fetchone()
+    return row[0] if row else 0
 
 
 # ═══════════════════════════════════════════════════════════
@@ -379,64 +372,59 @@ async def get_active_session_count() -> int:
 
 async def get_task(task_id: str) -> dict[str, Any] | None:
     """查询单个任务"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        return dict(row)
+    db = await get_shared_db()
+    cursor = await execute_read(db, "SELECT * FROM tasks WHERE id = ?", (task_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return dict(row)
 
 
 # ═══════════════════════════════════════════════════════════
 # v0_1_1 Phase 3: users 表 CRUD
 # ═══════════════════════════════════════════════════════════
 
-# v0_1_2_d (B0 标注): 复合写（先插 → 查回）。Phase 2 (B1) 收敛时须包进 write_transaction。
+# v0_1_2_d (B0 标注): 复合写（先插 → 查回）。Phase 2 (B1) 已包进 write_transaction。
 async def create_user(user_id: str, display_name: str = "", enabled: bool = True) -> dict[str, Any]:
     """创建用户"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    db = await get_shared_db()
+
+    async def _create() -> dict[str, Any]:
         await db.execute(
             """INSERT OR IGNORE INTO users (id, enabled, display_name, created_at, updated_at)
                VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
             (user_id, int(enabled), display_name),
         )
-        await db.commit()
-
-        db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = await cursor.fetchone()
         if row is None:
             raise RuntimeError(f"Failed to create user: {user_id}")
         return dict(row)
 
+    return await write_transaction(db, _create)
+
 
 async def get_user(user_id: str) -> dict[str, Any] | None:
     """查询单个用户"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+    db = await get_shared_db()
+    cursor = await execute_read(db, "SELECT * FROM users WHERE id = ?", (user_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 async def list_users() -> list[dict[str, Any]]:
     """列出所有用户"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM users ORDER BY created_at DESC")
-        return [dict(row) for row in await cursor.fetchall()]
+    db = await get_shared_db()
+    cursor = await execute_read(db, "SELECT * FROM users ORDER BY created_at DESC")
+    return [dict(row) for row in await cursor.fetchall()]
 
 
-# v0_1_2_d (B0 标注): 复合写（多步 UPDATE + 逐行 rowcount 判断）。Phase 2 (B1) 收敛时须包进 write_transaction。
+# v0_1_2_d (B0 标注): 复合写（多步 UPDATE + 逐行 rowcount 判断）。Phase 2 (B1) 已包进 write_transaction。
 async def update_user(user_id: str, enabled: bool | None = None, display_name: str | None = None) -> bool:
     """更新用户（启用/禁用 或 改名）"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    db = await get_shared_db()
+
+    async def _update() -> bool:
         if enabled is not None:
             cursor = await db.execute(
                 "UPDATE users SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -451,14 +439,13 @@ async def update_user(user_id: str, enabled: bool | None = None, display_name: s
             )
             if cursor.rowcount == 0:
                 return False
-        await db.commit()
         return True
+
+    return await write_transaction(db, _update)
 
 
 async def delete_user(user_id: str) -> bool:
     """删除用户"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        await db.commit()
-        return cursor.rowcount > 0
+    db = await get_shared_db()
+    cursor = await execute_write(db, "DELETE FROM users WHERE id = ?", (user_id,))
+    return cursor.rowcount > 0

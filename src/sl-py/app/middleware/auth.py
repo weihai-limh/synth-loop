@@ -9,7 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ..config import get_auth_settings, get_section
-from ..database import get_db_path
+from ..database import get_shared_db
 
 logger = logging.getLogger(__name__)
 
@@ -66,18 +66,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return True
 
         # 查 users 表
-        db_path = get_db_path()
         try:
-            async with aiosqlite.connect(db_path) as db:
-                db.row_factory = aiosqlite.Row
-                cursor = await db.execute(
-                    "SELECT id, enabled FROM users WHERE id = ?",
-                    (user_id,),
-                )
-                row = await cursor.fetchone()
-                if row and row["enabled"]:
-                    self._cache[user_id] = time.time()
-                    return True
+            db = await get_shared_db()
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, enabled FROM users WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            if row and row["enabled"]:
+                self._cache[user_id] = time.time()
+                return True
         except Exception as e:
             logger.error(f"Auth middleware DB query failed: {e}")
 

@@ -8,9 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-import aiosqlite
-
-from ..database import get_db_path
+from ..database import get_shared_db, execute_write, execute_read, write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +38,10 @@ class JobStore:
         config: Optional[dict] = None,
     ) -> JobRecord:
         """创建 Job"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            now = datetime.utcnow().isoformat()
+        db = await get_shared_db()
+        now = datetime.utcnow().isoformat()
+
+        async def _create() -> None:
             await db.execute(
                 """
                 INSERT INTO job_store (id, job_type, status, session_id, config_json, created_at, updated_at)
@@ -50,7 +49,8 @@ class JobStore:
             """,
                 (job_id, job_type, session_id, json.dumps(config or {}), now, now),
             )
-            await db.commit()
+
+        await write_transaction(db, _create)
 
         record = await self.get(job_id)
         if record is None:
@@ -60,78 +60,74 @@ class JobStore:
 
     async def get(self, job_id: str) -> Optional[JobRecord]:
         """获取 Job"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM job_store WHERE id = ?", (job_id,)
-            )
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            return JobRecord(dict(row))
+        db = await get_shared_db()
+        db.row_factory = aiosqlite.Row
+        cursor = await execute_read(db, "SELECT * FROM job_store WHERE id = ?", (job_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return JobRecord(dict(row))
 
     async def update_status(self, job_id: str, status: str, result: Optional[dict] = None) -> bool:
         """更新 Job 状态"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            now = datetime.utcnow().isoformat()
-            result_json = json.dumps(result) if result else None
-            if result_json is not None:
-                await db.execute(
-                    "UPDATE job_store SET status = ?, result_json = ?, updated_at = ? WHERE id = ?",
-                    (status, result_json, now, job_id),
-                )
-            else:
-                await db.execute(
-                    "UPDATE job_store SET status = ?, updated_at = ? WHERE id = ?",
-                    (status, now, job_id),
-                )
-            await db.commit()
-            cursor = await db.execute("SELECT changes()")
-            row = await cursor.fetchone()
-            updated = row[0] > 0 if row else False
-            if updated:
-                logger.info(f"Job status updated: {job_id} -> {status}")
-            return updated
+        db = await get_shared_db()
+        now = datetime.utcnow().isoformat()
+        result_json = json.dumps(result) if result else None
+        if result_json is not None:
+            await execute_write(
+                db,
+                "UPDATE job_store SET status = ?, result_json = ?, updated_at = ? WHERE id = ?",
+                (status, result_json, now, job_id),
+            )
+        else:
+            await execute_write(
+                db,
+                "UPDATE job_store SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now, job_id),
+            )
+        cursor = await execute_read(db, "SELECT changes()")
+        row = await cursor.fetchone()
+        updated = row[0] > 0 if row else False
+        if updated:
+            logger.info(f"Job status updated: {job_id} -> {status}")
+        return updated
 
     async def list_by_type(self, job_type: str, status: Optional[str] = None) -> list[JobRecord]:
         """按类型和状态查询 Job"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
-            if status:
-                cursor = await db.execute(
-                    "SELECT * FROM job_store WHERE job_type = ? AND status = ? ORDER BY created_at DESC",
-                    (job_type, status),
-                )
-            else:
-                cursor = await db.execute(
-                    "SELECT * FROM job_store WHERE job_type = ? ORDER BY created_at DESC",
-                    (job_type,),
-                )
-            rows = await cursor.fetchall()
-            return [JobRecord(dict(row)) for row in rows]
+        db = await get_shared_db()
+        db.row_factory = aiosqlite.Row
+        if status:
+            cursor = await execute_read(
+                db,
+                "SELECT * FROM job_store WHERE job_type = ? AND status = ? ORDER BY created_at DESC",
+                (job_type, status),
+            )
+        else:
+            cursor = await execute_read(
+                db,
+                "SELECT * FROM job_store WHERE job_type = ? ORDER BY created_at DESC",
+                (job_type,),
+            )
+        rows = await cursor.fetchall()
+        return [JobRecord(dict(row)) for row in rows]
 
     async def list_by_session(self, session_id: str) -> list[JobRecord]:
         """按 session_id 查询 Job"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM job_store WHERE session_id = ? ORDER BY created_at DESC",
-                (session_id,),
-            )
-            rows = await cursor.fetchall()
-            return [JobRecord(dict(row)) for row in rows]
+        db = await get_shared_db()
+        db.row_factory = aiosqlite.Row
+        cursor = await execute_read(
+            db,
+            "SELECT * FROM job_store WHERE session_id = ? ORDER BY created_at DESC",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        return [JobRecord(dict(row)) for row in rows]
 
     async def delete(self, job_id: str) -> bool:
         """删除 Job"""
-        db_path = get_db_path()
-        async with aiosqlite.connect(db_path) as db:
-            cursor = await db.execute("DELETE FROM job_store WHERE id = ?", (job_id,))
-            await db.commit()
-            return cursor.rowcount > 0
+        db = await get_shared_db()
+        cursor = await execute_write(db, "DELETE FROM job_store WHERE id = ?", (job_id,))
+        return cursor.rowcount > 0
 
 
 # 全局实例

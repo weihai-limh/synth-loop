@@ -2,10 +2,9 @@
 import logging
 from typing import Any
 
-import aiosqlite
 from fastapi import APIRouter, HTTPException
 
-from ..database import get_db_path, get_task
+from ..database import get_task, get_shared_db, execute_write
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +30,14 @@ async def get_task_status(task_id: str) -> dict[str, Any]:
 @router.post("/{task_id}/cancel", summary="Cancel task")
 async def cancel_task(task_id: str) -> dict[str, Any]:
     """取消任务——设置 status=cancelled"""
-    db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
-        cursor = await db.execute(
-            "UPDATE tasks SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (task_id,),
-        )
-        await db.commit()
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    db = await get_shared_db()
+    cursor = await execute_write(
+        db,
+        "UPDATE tasks SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (task_id,),
+    )
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
     logger.info(f"Task cancelled: {task_id}")
     return {"id": task_id, "status": "cancelled"}
