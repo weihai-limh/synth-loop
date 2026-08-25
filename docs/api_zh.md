@@ -677,7 +677,7 @@ GET /health
 
 ---
 
-### 任务管理（v0_1_1 新增）
+### 任务管理（v0_1_1 新增，v0.1.2_d 语义变更见下）
 
 #### GET /api/v1/tasks/{task_id}
 
@@ -698,7 +698,8 @@ GET /health
 
 #### POST /api/v1/tasks/{task_id}/cancel
 
-取消异步任务。任务状态变为 `cancelled`，TaskChainExecutor 在下一步前中断。
+
+取消异步任务。任务状态变为 `cancelled`。
 
 **响应**：200
 
@@ -770,10 +771,6 @@ GET /health
 
 ---
 
-### 管道管理 API（v0.1.2，`pipelines_api.enabled` 默认 false）
-
-> 9 端点管理面：创建/计划确认/启动/查询/暂停恢复中止/路径确认/审批/驳回/相位查询。
-> `enabled=false`（默认）时全部 404——对外主契约走 chat（`synth_pipeline` 字段），端点保留给调试/管理。
 
 ### 用户管理（v0_1_1 新增）
 
@@ -1355,5 +1352,5 @@ packets:
 
 ---
 
-*文档版本：v1.2*
-*更新时间：2026-08-24 | v0.1.2_c：永久区数据面 /v1/longdata（doc/memory 引入/删除/列出）+ 类型准入进配置 packets.types*
+*文档版本：v1.3*
+*更新时间：2026-08-25 | v0.1.2_d：任务管理 cancel 端点语义变更（旧 TaskChainExecutor 删除，改 TaskChainService 单步闭环；cancel 降级为历史兼容端点）+ DB 统一 / logic_category 外置（详见设计文档 §七）*

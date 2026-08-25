@@ -36,12 +36,26 @@ async def get_shared_db() -> aiosqlite.Connection:
 # 跨 await 复用错误。模块级锁保证「一个写事务完整提交前，另一个不开始」。
 # ⚠ 注意：本 Phase 仅引入封装，运行期调用点收敛在 Phase 2 (B1)。
 # ═══════════════════════════════════════════════════════════
-_write_lock = asyncio.Lock()
+_write_lock: "asyncio.Lock | None" = None
+
+
+def _get_write_lock() -> "asyncio.Lock":
+    """懒绑定写入串行化锁到当前 event loop。
+
+    asyncio.Lock 绑定到创建时的 loop；模块级锁在「跨 event loop」场景
+    （如每个测试独立 loop、或运行时 loop 重启）会抛
+    'bound to a different event loop'。改为懒创建，始终绑定当前 loop，
+    契合 B0/B1 单共享连接 + 串行写目标，且对测试与运行时均稳健。
+    """
+    global _write_lock
+    if _write_lock is None or _write_lock._loop is not asyncio.get_event_loop():
+        _write_lock = asyncio.Lock()
+    return _write_lock
 
 
 async def execute_write(db: aiosqlite.Connection, sql: str, params: tuple = ()) -> aiosqlite.Cursor:
     """写操作统一入口：持 _write_lock，保证一个写事务完整提交前另一个不开始。"""
-    async with _write_lock:
+    async with _get_write_lock():
         cur = await db.execute(sql, params)
         await db.commit()
         return cur
@@ -59,7 +73,7 @@ async def write_transaction(
     用于含中间 await 的复合操作（如 update_user / cleanup_expired_sessions /
     create_user），避免锁外交错导致跨 await 复用错误。
     Phase 2 (B1) 收敛时这些复合写函数须包进本包裹器。"""
-    async with _write_lock:
+    async with _get_write_lock():
         result = await coro()
         await db.commit()
         return result

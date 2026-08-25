@@ -456,31 +456,35 @@ async def _handle_prompt_chat_level(request, session, user_text, complexity, log
 
 
 async def _handle_task_chain_placeholder(request, session, user_text, logic_category, current_user_content, client_system_messages, api_key):
-    """task_chain 路由入口（v0_1_2_d #6 红线：旧 TaskChainExecutor 已删除）。
+    """task_chain 路由入口（v0_1_2_d M4：新 TaskChainService 驱动）。
 
-    Phase 4 占位：仅保留路由外壳，不调用任何旧执行器；真实执行由 Phase 8
-    新 TaskChainService 接入。M4 前返回显式"暂未启用"，避免路由悬空。
+    Phase 4 占位已替换为真实执行：委托 TaskChainService 经 text-cli 编排，
+    写 tasks 表（G3 落库责任承接），并返回 OpenAI 格式响应。
     """
-    logger.warning(
-        f"task_chain dispatch received but TaskChainService not yet wired (Phase 8 pending): "
-        f"session={session.session_id}, logic_category={logic_category}"
-    )
-    response = {
-        "id": f"chain-{session.session_id}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": request.model or "task-chain",
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": "⚠ task_chain 执行器已在 v0_1_2_d 重构中移除，新的 TaskChainService 将于 Phase 8 接入。当前暂未启用。",
-            },
-            "finish_reason": "stop",
-        }],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-    return JSONResponse(content=response)
+    from ..services.task_chain_service import TaskChainService
+
+    level = getattr(request, "fractal_level", None) or "task_chain"
+    service = TaskChainService()
+    try:
+        result = await service.run(
+            user_text=user_text,
+            session=session,
+            level=level,
+            logic_category=logic_category,
+            api_key=api_key,
+        )
+    except Exception as e:
+        logger.error(f"task_chain dispatch failed: {e}")
+        return JSONResponse(status_code=500, content={
+            "id": f"chain-err-{session.session_id}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": request.model or "task-chain",
+            "choices": [{"index": 0, "message": {"role": "assistant",
+                "content": f"⚠ task_chain 执行失败：{e}"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        })
+    return JSONResponse(content=result)
 
 
 async def _handle_streaming(request, session, user_text, complexity, logic_category,

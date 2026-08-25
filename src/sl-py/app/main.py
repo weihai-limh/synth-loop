@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_database, get_shared_db, close_shared_db
 from .middleware.auth import AuthMiddleware
-from .routers import chat, health, anthropic_chat, admin, tasks, packets, pipeline, runtime_endpoints, artifacts, gate, longdata
+from .routers import chat, health, anthropic_chat, admin, tasks, packets, runtime_endpoints, artifacts, gate, longdata
 
 
 @asynccontextmanager

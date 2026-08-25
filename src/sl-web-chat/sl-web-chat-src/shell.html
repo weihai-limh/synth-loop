@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sl-web-chat</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            height: 100dvh; /* 移动端动态视口，避免地址栏遮挡 */
+        }
+        .chat-container {
+            background: white;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+        .data-panel {
+            display: none; /* 默认收起 */
+            flex: 0 0 280px;
+            width: 280px;
+            border-right: 1px solid #e3e3e3;
+            background: #fafbfc;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .data-panel.show {
+            display: flex;
+        }
+        .data-panel-header {
+            padding: 12px 14px;
+            font-weight: bold;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+        .data-panel-add {
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .data-panel-list {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .ld-item {
+            background: #fff;
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .ld-item-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .ld-type {
+            font-weight: bold;
+            color: #4a6fa5;
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+        .ld-del {
+            border: none;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .ld-del:hover { color: #d32f2f; }
+        .ld-content {
+            color: #333;
+            white-space: pre-line;
+            max-height: 120px;
+            overflow-y: auto;
+            word-break: break-word;
+        }
+        .ld-empty {
+            color: #999;
+            font-size: 12px;
+            text-align: center;
+            padding: 20px 0;
+        }
+        .ld-form {
+            border: 1px solid #4a6fa5;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f0f5fb;
+        }
+        .ld-form select, .ld-form textarea {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+            margin-bottom: 6px;
+        }
+        .ld-form textarea {
+            height: 70px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .ld-form-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .ld-form-actions button {
+            flex: 1;
+            padding: 6px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .ld-form-submit { background: #4a6fa5; color: white; }
+        .ld-form-cancel { background: #ccc; color: #333; }
+        .chat-main {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-header {
+            background: #4a6fa5;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .config-toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .lang-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .lang-btn.active {
+            background: #fff;
+            color: #4a6fa5;
+            border-color: #fff;
+        }
+        .config-panel {
+            display: none; /* 默认隐藏 */
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            background: #fafafa;
+        }
+        .config-panel.show {
+            display: block;
+        }
+        .config-row {
+            margin-bottom: 10px;
+        }
+        .config-row label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+            font-size: 14px;
+        }
+        .config-row input, .config-row textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .config-row textarea {
+            height: 80px;
+            resize: vertical;
+            font-family: monospace;
+        }
+        /* synth-loop 开关行：整行可点 + 放大 checkbox + 主题色 */
+        .config-row.synthloop-row { margin-bottom: 4px; }
+        .checkbox-label {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0 !important;
+            cursor: pointer;
+            font-weight: 600 !important;
+            font-size: 14px;
+            color: #1a73e8 !important;
+            user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            accent-color: #1a73e8;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+        .synthloop-hint-row { margin-bottom: 12px; }
+        .config-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .config-actions button {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .save-btn {
+            background: #4a6fa5;
+            color: white;
+        }
+        .cancel-btn {
+            background: #ccc;
+            color: #333;
+        }
+        .headers-toggle-btn {
+            background: #6c757d;
+            color: white;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 5px;
+        }
+        .config-toggle-group {
+            display: flex;
+            gap: 10px;
+        }
+        .config-toggle-group .headers-toggle-btn {
+            flex: 1;
+            margin-top: 0;
+        }
+        .headers-editor {
+            display: none;
+            margin-top: 10px;
+        }
+        .headers-editor.show {
+            display: block;
+        }
+        .chat-messages {
+            flex: 1 1 auto;
+            min-height: 0; /* 关键：flex 子项可滚动而非被内容撑开 */
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .message {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            max-width: 80%;
+            word-wrap: break-word;
+            white-space: pre-line;
+        }
+        .user-message {
+            background: #e3f2fd;
+            margin-left: auto;
+        }
+        .assistant-message {
+            background: #f1f1f1;
+            margin-right: auto;
+        }
+        .chat-input {
+            display: flex;
+            align-items: flex-end;
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+        .chat-input input,
+        .chat-input textarea {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: inherit;
+        }
+        .chat-input textarea {
+            resize: vertical;
+            min-height: 44px;
+            max-height: 40vh;
+            overflow-y: auto;
+            line-height: 1.4;
+        }
+        .chat-input button {
+            margin-left: 10px;
+            padding: 10px 20px;
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .upload-btn {
+            margin-left: 0;
+            margin-right: 10px;
+            padding: 10px 14px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .upload-btn:hover { background: #5a6268; }
+        .clean-btn { background: #6c757d; }
+        .clean-btn:hover { background: #5a6268; }
+        .attachments-tray {
+            display: none;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 15px 0;
+        }
+        .att-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #eef2f7;
+            border: 1px solid #dbe3ec;
+            border-radius: 16px;
+            padding: 4px 8px 4px 4px;
+            max-width: 240px;
+            font-size: 13px;
+        }
+        .att-thumb {
+            width: 28px;
+            height: 28px;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        .att-icon { font-size: 16px; }
+        .att-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 150px;
+        }
+        .att-remove {
+            border: none;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0 2px;
+        }
+        .att-remove:hover { color: #d32f2f; }
+        .att-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .status {
+            text-align: center;
+            padding: 8px;
+            font-size: 14px;
+            color: #666;
+        }
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px;
+            display: none;
+            white-space: pre-line;
+            line-height: 1.5;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* ===== 资源渲染（<resources> 协议） ===== */
+        .media-gallery {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 100%;
+        }
+        .resource-message {
+            max-width: 92%;
+            background: #f1f1f1;
+        }
+        /* 6.5.2 闸管理卡片 */
+        .gate-card {
+            max-width: 92%;
+            margin: 6px 0;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #d0d7e2;
+            background: #f6f9ff;
+            align-self: flex-start;
+        }
+        .gate-card-head {
+            font-weight: 700;
+            font-size: 13px;
+            color: #1a73e8;
+            margin-bottom: 6px;
+        }
+        .gate-card-phase {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 6px;
+        }
+        .gate-card-body {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #fff;
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            margin: 0 0 8px;
+            max-height: 260px;
+            overflow: auto;
+        }
+        .gate-card-artifact {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 8px;
+        }
+        .gate-artifact-loading {
+            font-size: 12px;
+            color: #5f6368;
+            font-style: italic;
+            margin-bottom: 6px;
+        }
+        .gate-artifact-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #1a73e8;
+            margin: 6px 0 4px;
+        }
+        .gate-artifact-empty {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 6px;
+        }
+        .gate-artifact-item {
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #fff;
+        }
+        .gate-artifact-name {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        .gate-artifact-summary {
+            font-size: 12px;
+            color: #333;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .gate-artifact-data {
+            margin-top: 6px;
+            font-size: 12px;
+        }
+        .gate-artifact-data pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #f6f6f6;
+            border-radius: 4px;
+            padding: 6px;
+            max-height: 200px;
+            overflow: auto;
+            font-family: monospace;
+        }
+        .gate-card-editor {
+            width: 100%;
+            min-height: 120px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border: 1px solid #e3e3e3;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .gate-card-editor.gate-editor-err {
+            border-color: #d93025;
+            background: #fce8e6;
+        }
+        .gate-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .gate-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #fff;
+        }
+        .gate-confirm { background: #1a73e8; }
+        .gate-reject { background: #ea8600; }
+        .gate-regen { background: #9334e6; }
+        .gate-abort { background: #d93025; }
+        .gate-opinion {
+            flex: 1 1 160px;
+            min-width: 140px;
+            border-radius: 6px;
+            border: 1px solid #e3e3e3;
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+        .gate-done {
+            max-width: 92%;
+            align-self: flex-start;
+            font-size: 12px;
+            color: #188038;
+            margin: 4px 0;
+        }
+        .media-item {
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid #e3e3e3;
+        }
+        .media-image {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        .media-video, .media-audio {
+            display: block;
+            width: 100%;
+            max-width: 480px;
+            border-radius: 8px;
+        }
+        .media-embed {
+            border-radius: 8px;
+        }
+        .media-embed > summary {
+            cursor: pointer;
+            padding: 8px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            background: #f7f7f7;
+            border-radius: 8px;
+            list-style: none;
+        }
+        .media-embed > summary::-webkit-details-marker { display: none; }
+        .media-embed-body {
+            padding: 8px 0 0;
+        }
+        .media-iframe {
+            width: 100%;
+            height: 380px;
+            border: 1px solid #e3e3e3;
+            border-radius: 8px;
+            background: #fff;
+        }
+        .media-open-link {
+            display: inline-block;
+            margin-top: 6px;
+            font-size: 13px;
+            color: #4a6fa5;
+            text-decoration: none;
+        }
+        .media-open-link:hover { text-decoration: underline; }
+        .media-broken, .media-invalid {
+            padding: 16px;
+            text-align: center;
+            font-size: 13px;
+            color: #b3261e;
+            background: #fdecea;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <span id="appTitle">sl-web-chat</span>
+            <div class="header-actions">
+                <button class="config-toggle-btn" id="toggleDataPanel" data-i18n="dataPanelBtn" data-sl-only="1">📂 Data</button>
+                <select id="langSelect" class="header-drop"></select>
+                <button class="config-toggle-btn" id="toggleConfig" data-i18n="configBtn">⚙️ Config</button>
+            </div>
+        </div>
+        
+        <!-- 配置面板 (默认隐藏) -->
+        <div class="config-panel" id="configPanel">
+            <div class="config-row">
+                <label data-i18n="baseUrlLabel">Base URL *</label>
+                <input type="text" id="cfgBaseUrl" data-i18n-ph="baseUrlPh" placeholder="e.g. /v1/chat/completions or https://api.example.com/v1/chat/completions">
+            </div>
+            <div class="config-row">
+                <label data-i18n="modelLabel">Model</label>
+                <input type="text" id="cfgModel" data-i18n-ph="modelPh" placeholder="e.g. gpt-3.5-turbo (leave empty for default)">
+            </div>
+            <div class="config-row">
+                <div class="config-toggle-group">
+                    <button class="headers-toggle-btn" id="toggleHeaders" data-i18n="headersBtn">📋 Edit Headers</button>
+                    <button class="headers-toggle-btn" id="toggleCdn" data-i18n="cdnBtn" data-sl-only="1">🌐 Configure CDN</button>
+                </div>
+                <div class="headers-editor" id="headersEditor">
+                    <textarea id="cfgHeaders" placeholder='{"Content-Type": "application/json"}'>{"Content-Type": "application/json"}</textarea>
+                    <div class="hint" data-i18n="headersHint">Enter valid JSON. Content-Type is included by default. Append your custom request headers here.</div>
+                </div>
+                <div class="headers-editor" id="cdnEditor" data-sl-only="1">
+                    <textarea id="cfgCdn" placeholder='{"cdn_url": "https://your-cdn.com"}'>{"cdn_url": ""}</textarea>
+                    <div class="hint" data-i18n="cdnHint">cdn_url is only the base for upload/callback: not a request header, not the chat POST URL. Leave empty to fall back to the backend same-origin address.</div>
+                </div>
+            </div>
+            <div class="config-row synthloop-row">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="cfgEnableSynthLoop">
+                    <span data-i18n="synthLoopLabel">Enable synth-loop service</span>
+                </label>
+            </div>
+            <div class="config-row synthloop-hint-row" data-sl-only="1">
+                <div class="hint" data-i18n="synthLoopHint">When on, the chat uses the synth-loop backend (permanent context, upload endpoint, gate). When off, it is a plain OpenAI-style chat client.</div>
+            </div>
+            
+            <div class="config-row" id="configLangRow">
+                <label data-i18n="langLabel">Language</label>
+                <select id="langSelectCfg"></select>
+            </div>
+            <div class="config-actions">
+                <button class="cancel-btn" id="cancelConfig" data-i18n="cancelConfig">Cancel</button>
+                <button class="save-btn" id="saveConfig" data-i18n="saveConfig">Save Config</button>
+            </div>
+        </div>
+
+        <!-- 数据面面板（常驻抽屉，默认收起；仅含永久区 longdata 列表） -->
+        <div class="chat-body">
+        <aside class="data-panel" id="dataPanel">
+            <div class="data-panel-header">
+                <span data-i18n="dataPanelTitle">Context Data</span>
+                <button class="data-panel-add" id="addLongdataBtn" data-i18n="addEntry">+ Add</button>
+            </div>
+            <div class="data-panel-list" id="longdataList"></div>
+        </aside>
+
+        <div class="chat-main">
+        <div class="chat-messages" id="messages" role="log" aria-live="polite"></div>
+        <div class="error" id="error"></div>
+        <div class="status" id="status" data-i18n="statusReady">Ready</div>
+        <div class="attachments-tray" id="attachmentsTray"></div>
+        <form class="chat-input" id="chatForm">
+            <button type="button" class="upload-btn" id="uploadBtn" data-i18n-title="uploadTitle" title="Upload file">📎</button>
+            <input
+                type="file"
+                id="fileInput"
+                multiple
+                accept="image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx"
+                hidden
+            >
+            <textarea
+                id="userInput"
+                rows="1"
+                data-i18n-ph="inputPlaceholder"
+                placeholder="Type your message, or click 📎 to attach a file..."
+                autocomplete="off"
+            ></textarea>
+            <button type="submit" data-i18n="send">Send</button>
+            <button type="button" class="clean-btn" id="cleanBtn" data-i18n="clean">Clean</button>
+        </form>
+        </div>
+        </div>
+    </div>
+
+    <script>
+    // ===== 模块由 dev/build.js 注入，勿手改此段 =====
+</script>
+</body>
+</html>

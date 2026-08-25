@@ -1,0 +1,2274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sl-web-chat</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            height: 100dvh; /* 移动端动态视口，避免地址栏遮挡 */
+        }
+        .chat-container {
+            background: white;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+        .data-panel {
+            display: none; /* 默认收起 */
+            flex: 0 0 280px;
+            width: 280px;
+            border-right: 1px solid #e3e3e3;
+            background: #fafbfc;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .data-panel.show {
+            display: flex;
+        }
+        .data-panel-header {
+            padding: 12px 14px;
+            font-weight: bold;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+        .data-panel-add {
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .data-panel-list {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .ld-item {
+            background: #fff;
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .ld-item-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .ld-type {
+            font-weight: bold;
+            color: #4a6fa5;
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+        .ld-del {
+            border: none;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .ld-del:hover { color: #d32f2f; }
+        .ld-content {
+            color: #333;
+            white-space: pre-line;
+            max-height: 120px;
+            overflow-y: auto;
+            word-break: break-word;
+        }
+        .ld-empty {
+            color: #999;
+            font-size: 12px;
+            text-align: center;
+            padding: 20px 0;
+        }
+        .ld-form {
+            border: 1px solid #4a6fa5;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f0f5fb;
+        }
+        .ld-form select, .ld-form textarea {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+            margin-bottom: 6px;
+        }
+        .ld-form textarea {
+            height: 70px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .ld-form-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .ld-form-actions button {
+            flex: 1;
+            padding: 6px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .ld-form-submit { background: #4a6fa5; color: white; }
+        .ld-form-cancel { background: #ccc; color: #333; }
+        .chat-main {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-header {
+            background: #4a6fa5;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .config-toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .lang-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .lang-btn.active {
+            background: #fff;
+            color: #4a6fa5;
+            border-color: #fff;
+        }
+        .config-panel {
+            display: none; /* 默认隐藏 */
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            background: #fafafa;
+        }
+        .config-panel.show {
+            display: block;
+        }
+        .config-row {
+            margin-bottom: 10px;
+        }
+        .config-row label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+            font-size: 14px;
+        }
+        .config-row input, .config-row textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .config-row textarea {
+            height: 80px;
+            resize: vertical;
+            font-family: monospace;
+        }
+        /* synth-loop 开关行：整行可点 + 放大 checkbox + 主题色 */
+        .config-row.synthloop-row { margin-bottom: 4px; }
+        .checkbox-label {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0 !important;
+            cursor: pointer;
+            font-weight: 600 !important;
+            font-size: 14px;
+            color: #1a73e8 !important;
+            user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            accent-color: #1a73e8;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+        .synthloop-hint-row { margin-bottom: 12px; }
+        .config-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .config-actions button {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .save-btn {
+            background: #4a6fa5;
+            color: white;
+        }
+        .cancel-btn {
+            background: #ccc;
+            color: #333;
+        }
+        .headers-toggle-btn {
+            background: #6c757d;
+            color: white;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 5px;
+        }
+        .config-toggle-group {
+            display: flex;
+            gap: 10px;
+        }
+        .config-toggle-group .headers-toggle-btn {
+            flex: 1;
+            margin-top: 0;
+        }
+        .headers-editor {
+            display: none;
+            margin-top: 10px;
+        }
+        .headers-editor.show {
+            display: block;
+        }
+        .chat-messages {
+            flex: 1 1 auto;
+            min-height: 0; /* 关键：flex 子项可滚动而非被内容撑开 */
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .message {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            max-width: 80%;
+            word-wrap: break-word;
+            white-space: pre-line;
+        }
+        .user-message {
+            background: #e3f2fd;
+            margin-left: auto;
+        }
+        .assistant-message {
+            background: #f1f1f1;
+            margin-right: auto;
+        }
+        .chat-input {
+            display: flex;
+            align-items: flex-end;
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+        .chat-input input,
+        .chat-input textarea {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: inherit;
+        }
+        .chat-input textarea {
+            resize: vertical;
+            min-height: 44px;
+            max-height: 40vh;
+            overflow-y: auto;
+            line-height: 1.4;
+        }
+        .chat-input button {
+            margin-left: 10px;
+            padding: 10px 20px;
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .upload-btn {
+            margin-left: 0;
+            margin-right: 10px;
+            padding: 10px 14px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .upload-btn:hover { background: #5a6268; }
+        .clean-btn { background: #6c757d; }
+        .clean-btn:hover { background: #5a6268; }
+        .attachments-tray {
+            display: none;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 15px 0;
+        }
+        .att-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #eef2f7;
+            border: 1px solid #dbe3ec;
+            border-radius: 16px;
+            padding: 4px 8px 4px 4px;
+            max-width: 240px;
+            font-size: 13px;
+        }
+        .att-thumb {
+            width: 28px;
+            height: 28px;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        .att-icon { font-size: 16px; }
+        .att-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 150px;
+        }
+        .att-remove {
+            border: none;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0 2px;
+        }
+        .att-remove:hover { color: #d32f2f; }
+        .att-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .status {
+            text-align: center;
+            padding: 8px;
+            font-size: 14px;
+            color: #666;
+        }
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px;
+            display: none;
+            white-space: pre-line;
+            line-height: 1.5;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* ===== 资源渲染（<resources> 协议） ===== */
+        .media-gallery {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 100%;
+        }
+        .resource-message {
+            max-width: 92%;
+            background: #f1f1f1;
+        }
+        /* 6.5.2 闸管理卡片 */
+        .gate-card {
+            max-width: 92%;
+            margin: 6px 0;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #d0d7e2;
+            background: #f6f9ff;
+            align-self: flex-start;
+        }
+        .gate-card-head {
+            font-weight: 700;
+            font-size: 13px;
+            color: #1a73e8;
+            margin-bottom: 6px;
+        }
+        .gate-card-phase {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 6px;
+        }
+        .gate-card-body {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #fff;
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            margin: 0 0 8px;
+            max-height: 260px;
+            overflow: auto;
+        }
+        .gate-card-artifact {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 8px;
+        }
+        .gate-artifact-loading {
+            font-size: 12px;
+            color: #5f6368;
+            font-style: italic;
+            margin-bottom: 6px;
+        }
+        .gate-artifact-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #1a73e8;
+            margin: 6px 0 4px;
+        }
+        .gate-artifact-empty {
+            font-size: 12px;
+            color: #5f6368;
+            margin-bottom: 6px;
+        }
+        .gate-artifact-item {
+            border: 1px solid #e3e3e3;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #fff;
+        }
+        .gate-artifact-name {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        .gate-artifact-summary {
+            font-size: 12px;
+            color: #333;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .gate-artifact-data {
+            margin-top: 6px;
+            font-size: 12px;
+        }
+        .gate-artifact-data pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #f6f6f6;
+            border-radius: 4px;
+            padding: 6px;
+            max-height: 200px;
+            overflow: auto;
+            font-family: monospace;
+        }
+        .gate-card-editor {
+            width: 100%;
+            min-height: 120px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border: 1px solid #e3e3e3;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .gate-card-editor.gate-editor-err {
+            border-color: #d93025;
+            background: #fce8e6;
+        }
+        .gate-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .gate-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #fff;
+        }
+        .gate-confirm { background: #1a73e8; }
+        .gate-reject { background: #ea8600; }
+        .gate-regen { background: #9334e6; }
+        .gate-abort { background: #d93025; }
+        .gate-opinion {
+            flex: 1 1 160px;
+            min-width: 140px;
+            border-radius: 6px;
+            border: 1px solid #e3e3e3;
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+        .gate-done {
+            max-width: 92%;
+            align-self: flex-start;
+            font-size: 12px;
+            color: #188038;
+            margin: 4px 0;
+        }
+        .media-item {
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid #e3e3e3;
+        }
+        .media-image {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        .media-video, .media-audio {
+            display: block;
+            width: 100%;
+            max-width: 480px;
+            border-radius: 8px;
+        }
+        .media-embed {
+            border-radius: 8px;
+        }
+        .media-embed > summary {
+            cursor: pointer;
+            padding: 8px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            background: #f7f7f7;
+            border-radius: 8px;
+            list-style: none;
+        }
+        .media-embed > summary::-webkit-details-marker { display: none; }
+        .media-embed-body {
+            padding: 8px 0 0;
+        }
+        .media-iframe {
+            width: 100%;
+            height: 380px;
+            border: 1px solid #e3e3e3;
+            border-radius: 8px;
+            background: #fff;
+        }
+        .media-open-link {
+            display: inline-block;
+            margin-top: 6px;
+            font-size: 13px;
+            color: #4a6fa5;
+            text-decoration: none;
+        }
+        .media-open-link:hover { text-decoration: underline; }
+        .media-broken, .media-invalid {
+            padding: 16px;
+            text-align: center;
+            font-size: 13px;
+            color: #b3261e;
+            background: #fdecea;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <span id="appTitle">sl-web-chat</span>
+            <div class="header-actions">
+                <button class="config-toggle-btn" id="toggleDataPanel" data-i18n="dataPanelBtn" data-sl-only="1">📂 Data</button>
+                <select id="langSelect" class="header-drop"></select>
+                <button class="config-toggle-btn" id="toggleConfig" data-i18n="configBtn">⚙️ Config</button>
+            </div>
+        </div>
+        
+        <!-- 配置面板 (默认隐藏) -->
+        <div class="config-panel" id="configPanel">
+            <div class="config-row">
+                <label data-i18n="baseUrlLabel">Base URL *</label>
+                <input type="text" id="cfgBaseUrl" data-i18n-ph="baseUrlPh" placeholder="e.g. /v1/chat/completions or https://api.example.com/v1/chat/completions">
+            </div>
+            <div class="config-row">
+                <label data-i18n="modelLabel">Model</label>
+                <input type="text" id="cfgModel" data-i18n-ph="modelPh" placeholder="e.g. gpt-3.5-turbo (leave empty for default)">
+            </div>
+            <div class="config-row">
+                <div class="config-toggle-group">
+                    <button class="headers-toggle-btn" id="toggleHeaders" data-i18n="headersBtn">📋 Edit Headers</button>
+                    <button class="headers-toggle-btn" id="toggleCdn" data-i18n="cdnBtn" data-sl-only="1">🌐 Configure CDN</button>
+                </div>
+                <div class="headers-editor" id="headersEditor">
+                    <textarea id="cfgHeaders" placeholder='{"Content-Type": "application/json"}'>{"Content-Type": "application/json"}</textarea>
+                    <div class="hint" data-i18n="headersHint">Enter valid JSON. Content-Type is included by default. Append your custom request headers here.</div>
+                </div>
+                <div class="headers-editor" id="cdnEditor" data-sl-only="1">
+                    <textarea id="cfgCdn" placeholder='{"cdn_url": "https://your-cdn.com"}'>{"cdn_url": ""}</textarea>
+                    <div class="hint" data-i18n="cdnHint">cdn_url is only the base for upload/callback: not a request header, not the chat POST URL. Leave empty to fall back to the backend same-origin address.</div>
+                </div>
+            </div>
+            <div class="config-row synthloop-row">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="cfgEnableSynthLoop">
+                    <span data-i18n="synthLoopLabel">Enable synth-loop service</span>
+                </label>
+            </div>
+            <div class="config-row synthloop-hint-row" data-sl-only="1">
+                <div class="hint" data-i18n="synthLoopHint">When on, the chat uses the synth-loop backend (permanent context, upload endpoint, gate). When off, it is a plain OpenAI-style chat client.</div>
+            </div>
+            
+            <div class="config-row" id="configLangRow">
+                <label data-i18n="langLabel">Language</label>
+                <select id="langSelectCfg"></select>
+            </div>
+            <div class="config-actions">
+                <button class="cancel-btn" id="cancelConfig" data-i18n="cancelConfig">Cancel</button>
+                <button class="save-btn" id="saveConfig" data-i18n="saveConfig">Save Config</button>
+            </div>
+        </div>
+
+        <!-- 数据面面板（常驻抽屉，默认收起；仅含永久区 longdata 列表） -->
+        <div class="chat-body">
+        <aside class="data-panel" id="dataPanel">
+            <div class="data-panel-header">
+                <span data-i18n="dataPanelTitle">Context Data</span>
+                <button class="data-panel-add" id="addLongdataBtn" data-i18n="addEntry">+ Add</button>
+            </div>
+            <div class="data-panel-list" id="longdataList"></div>
+        </aside>
+
+        <div class="chat-main">
+        <div class="chat-messages" id="messages" role="log" aria-live="polite"></div>
+        <div class="error" id="error"></div>
+        <div class="status" id="status" data-i18n="statusReady">Ready</div>
+        <div class="attachments-tray" id="attachmentsTray"></div>
+        <form class="chat-input" id="chatForm">
+            <button type="button" class="upload-btn" id="uploadBtn" data-i18n-title="uploadTitle" title="Upload file">📎</button>
+            <input
+                type="file"
+                id="fileInput"
+                multiple
+                accept="image/*,video/*,audio/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx"
+                hidden
+            >
+            <textarea
+                id="userInput"
+                rows="1"
+                data-i18n-ph="inputPlaceholder"
+                placeholder="Type your message, or click 📎 to attach a file..."
+                autocomplete="off"
+            ></textarea>
+            <button type="submit" data-i18n="send">Send</button>
+            <button type="button" class="clean-btn" id="cleanBtn" data-i18n="clean">Clean</button>
+        </form>
+        </div>
+        </div>
+    </div>
+
+    <script>
+// ---- i18n (from i18n.json, lang=both) ----
+const LANGS = {
+    "en": {
+        "label": "EN",
+        "name": "English",
+        "prompt": "Please respond in English."
+    },
+    "zh": {
+        "label": "CN",
+        "name": "中文",
+        "prompt": "请使用中文响应。"
+    }
+};
+const I18N = {
+    "en": {
+        "configBtn": "⚙️ Config",
+        "send": "Send",
+        "clean": "Clean",
+        "uploadTitle": "Upload file",
+        "inputPlaceholder": "Type your message, or click 📎 to attach a file...",
+        "statusReady": "Ready",
+        "thinking": "Thinking...",
+        "streaming": "Streaming...",
+        "uploading": "Uploading: {name}",
+        "baseUrlLabel": "Base URL *",
+        "baseUrlPh": "e.g. /v1/chat/completions or https://api.example.com/v1/chat/completions",
+        "modelLabel": "Model",
+        "modelPh": "e.g. gpt-3.5-turbo (leave empty for default)",
+        "headersBtn": "📋 Edit Headers",
+        "cdnBtn": "🌐 Configure CDN",
+        "headersHint": "Enter valid JSON. Content-Type is included by default. Append your custom request headers here.",
+        "cdnHint": "cdn_url is only the base for upload/callback: not a request header, not the chat POST URL. Leave empty to fall back to the backend same-origin address.",
+        "saveConfig": "Save Config",
+        "cancelConfig": "Cancel",
+        "configSaved": "Config saved!",
+        "baseUrlEmpty": "Base URL cannot be empty",
+        "headersJsonErr": "Headers JSON format error: {msg}",
+        "requestFailed": "Request failed: {msg}",
+        "uploadFailed": "Upload failed: {msg}",
+        "packetQueued": "Added to temp context: {n} item(s) pending",
+        "brokenImage": "⚠️ Image failed to load",
+        "invalidResource": "⚠️ Invalid or blocked resource: {url}",
+        "openInNewTab": "Open in new tab ↗",
+        "mediaPdf": "📄 PDF: ",
+        "mediaWeb": "🌐 Web: ",
+        "removeAtt": "Remove {name}",
+        "greeting": "Hello! I'm your AI assistant.\nClick ⚙️ (top-right) to configure the API endpoint and Headers.",
+        "dataPanelBtn": "📂 Data",
+        "dataPanelTitle": "Context Data",
+        "addEntry": "+ Add",
+        "deleteEntry": "Delete",
+        "ldEmpty": "No entries yet. Click + Add to feed context.",
+        "typeDoc": "doc",
+        "typeMemory": "memory",
+        "ldContentPh": "Paste text content to feed as permanent context...",
+        "submitEntry": "Submit",
+        "cancelEntry": "Cancel",
+        "ldAddErr": "Add failed: {msg}",
+        "ldDelErr": "Delete failed: {msg}",
+        "synthLoopLabel": "Enable synth-loop service",
+        "synthLoopHint": "When on, the chat uses the synth-loop backend (permanent context, upload endpoint, gate). When off, it is a plain OpenAI-style chat client.",
+        "gateTitlePk": "Gate · Plan/Path Confirmation",
+        "gateTitleApproval": "Gate · Approval",
+        "gateTitleCk": "Gate · Inference Paused",
+        "gatePhase": "Phase {i}/{total}",
+        "gateArtifact": "Artifact: {ref}",
+        "gateContextParked": "Inference parked — context below:",
+        "confirmBtn": "Confirm",
+        "rejectBtn": "Reject",
+        "rejectOpinionPh": "Reason / alternative (optional)...",
+        "regenerateBtn": "Regenerate",
+        "abortBtn": "Abort",
+        "amendBtn": "Resume with edit",
+        "gateActionDone": "Gate response sent",
+        "artifactLoading": "Fetching artifact…",
+        "artifactView": "Artifact view",
+        "artifactFetchBtn": "Fetch",
+        "artifactEmpty": "No linked artifacts",
+        "artifactSummary": "Summary",
+        "artifactData": "Full data"
+    },
+    "zh": {
+        "configBtn": "⚙️ 配置",
+        "send": "发送",
+        "clean": "清除",
+        "uploadTitle": "上传文件",
+        "inputPlaceholder": "输入您的问题，或点 📎 上传文件...",
+        "statusReady": "就绪",
+        "thinking": "正在思考...",
+        "streaming": "流式输出中...",
+        "uploading": "上传中: {name}",
+        "baseUrlLabel": "Base URL *",
+        "baseUrlPh": "例如: /v1/chat/completions 或 https://api.example.com/v1/chat/completions",
+        "modelLabel": "Model",
+        "modelPh": "例如: gpt-3.5-turbo (留空则使用默认值)",
+        "headersBtn": "📋 编辑 Headers",
+        "cdnBtn": "🌐 配置 CDN",
+        "headersHint": "请输入合法的 JSON 格式。默认包含 Content-Type。在此追加您的自定义请求头。",
+        "cdnHint": "cdn_url 仅作文件上传/回链的基础地址：不会加入请求头，也不是对话的 POST 地址。留空则回退到后端同源地址。",
+        "saveConfig": "保存配置",
+        "cancelConfig": "取消",
+        "configSaved": "配置保存成功！",
+        "baseUrlEmpty": "Base URL 不能为空",
+        "headersJsonErr": "Headers JSON 格式错误: {msg}",
+        "requestFailed": "请求失败: {msg}",
+        "uploadFailed": "上传失败: {msg}",
+        "packetQueued": "已加入临时上下文: {n} 项待发送",
+        "brokenImage": "⚠️ 图片加载失败",
+        "invalidResource": "⚠️ 无效或被拦截的资源: {url}",
+        "openInNewTab": "在新标签打开 ↗",
+        "mediaPdf": "📄 PDF：",
+        "mediaWeb": "🌐 网页：",
+        "removeAtt": "移除 {name}",
+        "greeting": "你好！我是AI助手。\n点击右上角 ⚙️ 配置接口地址和Headers。",
+        "dataPanelBtn": "📂 数据",
+        "dataPanelTitle": "上下文数据",
+        "addEntry": "+ 添加",
+        "deleteEntry": "删除",
+        "ldEmpty": "暂无条目。点「+ 添加」喂入上下文。",
+        "typeDoc": "doc",
+        "typeMemory": "memory",
+        "ldContentPh": "粘贴要作为永久上下文喂入的文本内容...",
+        "submitEntry": "提交",
+        "cancelEntry": "取消",
+        "ldAddErr": "添加失败: {msg}",
+        "ldDelErr": "删除失败: {msg}",
+        "synthLoopLabel": "启用 synth-loop 服务",
+        "synthLoopHint": "开启时，对话走 synth-loop 后端（永久上下文、上传端点、闸机制）。关闭时，它是纯 OpenAI 风格聊天客户端。",
+        "gateTitlePk": "闸 · 计划/路径确认",
+        "gateTitleApproval": "闸 · 审批",
+        "gateTitleCk": "闸 · 推理已暂停",
+        "gatePhase": "阶段 {i}/{total}",
+        "gateArtifact": "产物: {ref}",
+        "gateContextParked": "推理已暂停——下方上下文：",
+        "confirmBtn": "确认",
+        "rejectBtn": "驳回",
+        "rejectOpinionPh": "理由 / 替代方案（可选）...",
+        "regenerateBtn": "重生成",
+        "abortBtn": "中止",
+        "amendBtn": "带编辑继续",
+        "gateActionDone": "闸响应已发送",
+        "artifactLoading": "取回产物中…",
+        "artifactView": "产物视图",
+        "artifactFetchBtn": "取回",
+        "artifactEmpty": "暂无关联产物",
+        "artifactSummary": "摘要",
+        "artifactData": "完整数据"
+    }
+};
+
+// ---- sl-config.js ----
+// ========== sl-config.js ==========
+// 配置状态管理 + 多语言（i18n）+ SYSTEM_PROMPTS 占位
+// 裁剪自 tc-config.js：删除 tc 桥接配置项 / 双令牌头 / tc 系统提示段。
+// synth-loop 是 OpenAI 兼容网关，壳只需 baseUrl + 通用 headers + 语言 prompt。
+
+// ---------- 配置持久化 ----------
+const CONFIG_KEY = 'sl-web-chat-config';
+const DEFAULT_CONFIG = {
+    baseUrl: '/v1/chat/completions',
+    model: 'default-model',
+    headers: { 'Content-Type': 'application/json' },
+    cdnUrl: '',
+    maxTokens: 1000,
+    temperature: 0.7,
+    enableSynthLoop: true
+};
+
+function loadConfig() {
+    try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        if (raw) {
+            const obj = JSON.parse(raw);
+            return {
+                ...DEFAULT_CONFIG,
+                ...obj,
+                headers: { 'Content-Type': 'application/json', ...(obj.headers || {}) }
+            };
+        }
+    } catch (e) { /* 解析失败回退默认 */ }
+    return { ...DEFAULT_CONFIG };
+}
+
+function saveConfig(config) {
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (e) { /* storage 满则静默失败 */ }
+}
+
+let runtimeConfig = loadConfig();
+
+// ---------- 语言注册表 + 多语言文案 ----------
+// 注意：LANGS / I18N 不再硬编码于此，改由构建时从 i18n.json 读取并按 --lang 注入到脚本段
+// （见 build.js：读 i18n.json → 拼 `const LANGS=...; const I18N=...;` 注入）。
+// 运行时此处仅消费全局 LANGS / I18N（同 <script> 共享作用域）。
+// 加语言 = 改 i18n.json 一行，无需动此文件。
+function langList() { return Object.keys(LANGS).map((k) => ({ code: k, ...LANGS[k] })); }
+
+// 默认语言：由注入词典推导——单语包只有一个键，默认即为该语言；双包回退 en
+let currentLang = (I18N && Object.keys(I18N).length === 1) ? Object.keys(I18N)[0] : 'en';
+
+function t(key, params) {
+    let s = I18N[currentLang] && I18N[currentLang][key];
+    if (s === undefined) {
+        // 双包才有 en 回退；单语包无 en 键，直接回退 key 本身（避免读 undefined['key'] 抛 TypeError）
+        s = (I18N.en && I18N.en[key] !== undefined) ? I18N.en[key] : key;
+    }
+    if (typeof s === 'function') return s(params);
+    if (params && typeof params === 'object') {
+        for (const k in params) s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k]);
+    }
+    return s;
+}
+
+// 语言 prompt 随下拉变（§3.5 / §3.2.1 第二条）；LANGS 已是注册表对象
+function currentLanguagePrompt() {
+    const lang = LANGS[currentLang] || LANGS.zh;
+    return lang ? lang.prompt : '';
+}
+
+// 遍历 LANGS 注册表生成 <option>（§3.5：语言是数据不是分支）
+function buildLangOptions() {
+    return langList().map((l) =>
+        `<option value="${l.code}">${l.label} · ${l.name}</option>`).join('');
+}
+
+// ---------- SYSTEM_PROMPTS（语种注入） ----------
+// synth-loop 是通用 OpenAI 兼容网关，壳只注入语种指令，不预置任何工具提示。
+function buildSystemPrompts() {
+    return [currentLanguagePrompt()];   // 语种指令注入
+}
+
+// ---------- 语言应用（§3.5：语言是数据不是分支，查表回退） ----------
+// 单语版（注入词典仅一个键）：隐藏语言下拉框（头部 + 面板），避免出现无效切换器
+function isSingleLang() {
+    return !!(I18N && Object.keys(I18N).length === 1);
+}
+
+function applyLang(lang) {
+    currentLang = lang || (isSingleLang() ? Object.keys(I18N)[0] : 'en');
+    document.documentElement.lang = (currentLang === 'zh') ? 'zh-CN' : 'en';
+    document.querySelectorAll('[data-i18n],[data-i18n-ph],[data-i18n-title]').forEach((el) => {
+        if (el.hasAttribute('data-i18n')) el.textContent = t(el.getAttribute('data-i18n'));
+        if (el.hasAttribute('data-i18n-ph')) el.placeholder = t(el.getAttribute('data-i18n-ph'));
+        if (el.hasAttribute('data-i18n-title')) el.title = t(el.getAttribute('data-i18n-title'));
+    });
+    // 单语版不显示语言配置（下拉 + 所在行）；双包才同步 options 并置选中项
+    const single = isSingleLang();
+    ['langSelect', 'langSelectCfg'].forEach((id) => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.style.display = single ? 'none' : '';
+        if (!single) {
+            if (!sel.options.length) sel.innerHTML = buildLangOptions();
+            sel.value = currentLang;
+        }
+    });
+    if (single) {
+        const langRow = document.getElementById('configLangRow');
+        if (langRow) langRow.style.display = 'none';
+    }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        DEFAULT_CONFIG, loadConfig, saveConfig,
+        LANGS, I18N, t, currentLanguagePrompt,
+        SYSTEM_PROMPTS_STATIC, buildSystemPrompts,
+        applyLang, bindLangButtons,
+        getRuntimeConfig: () => runtimeConfig,
+        setRuntimeConfig: (c) => { runtimeConfig = c; }
+    };
+}
+
+
+// ---- sl-gate.js ----
+// ========== sl-gate.js ==========
+// synth-loop 闸数据链接层（ck 推理闸 + pk 三闸）。
+// 重要区分（5.5 纠偏）：
+//   - 【ck 推理闸上下文编辑】在此：响应 gate:"pending" 时推理上下文被 park，
+//     用户编辑 context 后 amend（fetchGateContext / amendGateContext）→ 这是闸流程内的一步，由 ck 闸唤起。
+//   - 【数据面】（packets/longdata）不在此文件，见 sl-context.js —— 两者正交，不要混淆。
+// 本阶段只做数据链接：解析 chat 响应字段 + 构造回传，不含任何 UI。
+// UI（闸卡片 / 上下文编辑子面板 / 计划编辑子面板）留待 Phase 6.5。
+// 依赖（同 <script> 共享作用域）：runtimeConfig / slApiRoot（来自 sl-context.js）
+//
+// 后端契约（已核实 src/sl-py/app/routers/chat.py）：
+//   ck 推理闸：响应顶层 { gate:"pending", context_id, context }（chat.py:546-567）
+//             → 干预端点 GET/POST /chatgate/{context_id}（gate.py 注释声明，但 P3 阶段未实现，联调会 404）
+//             注意：此处的"上下文编辑"= 编辑被 park 的推理上下文，绝非数据面注入。
+//   pk 三闸：请求体带 synth_pipeline:{id, action}（chat.py:301）→ 响应带 synth_pipeline:{id,step,...}（:319-329）
+//             → 前端原样回传，无独立端点
+
+// ---------- 闸事件队列（会话级，供 UI 消费） ----------
+// 放在先加载模块，避免 sl-gate.js 的 renderPendingGateCards 调用时尚未定义。
+let pendingGateEvents = [];
+
+function getPendingGateEvents() { return pendingGateEvents.slice(); }
+function clearPendingGateEvents() { pendingGateEvents = []; }
+function pushGateEvent(evt) { if (evt && evt.kind) pendingGateEvents.push(evt); }
+
+// ---------- 解析 chat 响应：分流两类闸 ----------
+// 返回 { kind:'ck'|'pk'|null, ... }，供 Phase 6.5 UI 渲染
+function parseGateFromResponse(resp) {
+    if (!resp || typeof resp !== 'object') return { kind: null };
+    // pk 相位闸：响应带 synth_pipeline 字段
+    // 但 step==='completed' 是相位终态（mock 已完成并 pop pipeline），
+    // 不应再渲染带确认/驳回按钮的闸卡片，否则会触发多余的 confirm → 400 unknown pipeline_id。
+    if (resp.synth_pipeline && resp.synth_pipeline.id && resp.synth_pipeline.step !== 'completed') {
+        return { kind: 'pk', pipeline: resp.synth_pipeline };
+    }
+    // ck 推理闸：响应带 gate:"pending"
+    if (resp.gate === 'pending' && resp.context_id) {
+        return { kind: 'ck', context_id: resp.context_id, context: resp.context || {} };
+    }
+    return { kind: null };
+}
+
+// ---------- ck 推理闸：干预（端点后端 P3 未实现，数据层照写，联调登记附录 C） ----------
+async function fetchGateContext(contextId) {
+    // chatgate 在服务根路径（非 /v1 下），用 slApiOrigin() 而非 slApiRoot()
+    const url = slApiOrigin().replace(/\/$/, '') + '/chatgate/' + encodeURIComponent(contextId);
+    const res = await fetch(url, { headers: { ...runtimeConfig.headers } });
+    if (!res.ok) throw new Error('GET /chatgate/' + contextId + ' → HTTP ' + res.status + '（后端 P3 未实现，见附录 C）');
+    return await res.json();
+}
+
+async function amendGateContext(contextId, patch) {
+    const url = slApiOrigin().replace(/\/$/, '') + '/chatgate/' + encodeURIComponent(contextId);
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...runtimeConfig.headers },
+        body: JSON.stringify(patch || {})
+    });
+    if (!res.ok) throw new Error('POST /chatgate/' + contextId + ' → HTTP ' + res.status + '（后端 P3 未实现，见附录 C）');
+    return await res.json();
+}
+
+// ---------- pk 三闸：回传（注入下一轮 chat 请求体，无独立端点） ----------
+let pendingSynthPipelineReturn = null;   // { id, action }
+
+// 构造下一轮 chat 请求要带的 synth_pipeline 回传字段
+function takePendingSynthPipelineReturn() {
+    const r = pendingSynthPipelineReturn;
+    pendingSynthPipelineReturn = null;   // 消费即清空（每次确认/驳回只回传一次）
+    return r;
+}
+
+// UI 在 Phase 6.5 调用：把用户动作转为回传（confirm/reject/regenerate/abort/...）
+function queueSynthPipelineReturn(pipelineId, action, opinion) {
+    pendingSynthPipelineReturn = { id: pipelineId, action: action, ...(opinion ? { opinion } : {}) };
+}
+
+// peek：是否有待回传（供 sl-chat 提交拦截放行，不消费）
+function hasPendingSynthPipelineReturn() {
+    return !!pendingSynthPipelineReturn;
+}
+
+// ---------- Phase 5：计划编辑数据层（相位 plan/path 文本 + artifact 取回） ----------
+// 说明：本阶段只做数据链接，UI（结构化展示/确认面板）留 Phase 6.5。
+// 依赖 slApiRoot（来自 sl-context.js）/ runtimeConfig。
+
+// 从 synth_pipeline 安全提取 plan/path 文本（字段名由 Phase 7 校准，此处容错）
+function extractPlanFromPipeline(pipeline) {
+    if (!pipeline || typeof pipeline !== 'object') return null;
+    // 优先常见字段，回退到整对象 JSON（UI 层再决定如何呈现）
+    const cand = pipeline.plan || pipeline.plan_text || pipeline.phase_goal ||
+                 pipeline.path || pipeline.path_text;
+    if (typeof cand === 'string' && cand.trim()) return cand;
+    if (cand && typeof cand === 'object') return JSON.stringify(cand, null, 2);
+    return null;
+}
+
+// artifact 取回（端点已核实 api_zh.md:751/767 为 /api/v1/artifacts/{id} 与 /api/v1/artifacts?pipeline_id=）
+async function fetchArtifact(artifactId) {
+    // artifacts 在 /api/v1 下（非 /v1 的 chat 根），用 slApiOrigin()
+    const url = slApiOrigin().replace(/\/$/, '') + '/api/v1/artifacts/' + encodeURIComponent(artifactId);
+    const res = await fetch(url, { headers: { ...runtimeConfig.headers } });
+    if (!res.ok) throw new Error('GET /api/v1/artifacts/' + artifactId + ' → HTTP ' + res.status);
+    return await res.json();
+}
+
+async function listPipelineArtifacts(pipelineId) {
+    const url = slApiOrigin().replace(/\/$/, '') + '/api/v1/artifacts?pipeline_id=' + encodeURIComponent(pipelineId);
+    const res = await fetch(url, { headers: { ...runtimeConfig.headers } });
+    if (!res.ok) throw new Error('GET /api/v1/artifacts?pipeline_id=' + pipelineId + ' → HTTP ' + res.status);
+    return await res.json();
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        parseGateFromResponse, fetchGateContext, amendGateContext,
+        takePendingSynthPipelineReturn, queueSynthPipelineReturn,
+        extractPlanFromPipeline, fetchArtifact, listPipelineArtifacts,
+        renderPendingGateCards, renderGateCard
+    };
+}
+
+// ========== 以下为 Phase 6.5.2 UI 层：闸管理卡片 ==========
+// 消费 getPendingGateEvents()（sl-chat.js 推送），渲染两类卡片并接回传。
+// 纯 OpenAI 模式（!enableSynthLoop）不渲染。
+// 依赖（同 <script> 共享作用域）：getPendingGateEvents / clearPendingGateEvents（sl-chat.js）、
+//   runtimeConfig、slApiRoot、t（sl-integrate.js）、messagesContainer（sl-chat.js）
+
+// 入口：在每轮助手回答收尾后调用。队列为空则无操作。
+function renderPendingGateCards() {
+    if (!runtimeConfig.enableSynthLoop) return;
+    const events = getPendingGateEvents();
+    if (!events || !events.length) return;
+    events.forEach((evt) => renderGateCard(evt));
+    clearPendingGateEvents();   // 渲染即消费，避免重复
+}
+
+function gateStepTitle(kind, pipeline) {
+    if (kind === 'ck') return t('gateTitleCk');
+    const step = pipeline && pipeline.step;
+    if (step === 'awaiting_approval') return t('gateTitleApproval');
+    return t('gateTitlePk');   // awaiting_plan_confirm / awaiting_path_confirm
+}
+
+function renderGateCard(evt) {
+    const card = document.createElement('div');
+    card.className = 'gate-card gate-' + evt.kind;
+    // 不能声明同名局部 messagesContainer：会遮蔽全局 let 并触发 TDZ 自引用
+    // （Cannot access 'messagesContainer' before initialization）。
+    // 直接引用全局（initChatDom 已赋值）或回退 DOM。
+    const mount = (typeof messagesContainer !== 'undefined' && messagesContainer)
+        || document.getElementById('messages');
+    if (!mount) return;
+
+    if (evt.kind === 'pk') {
+        const p = evt.pipeline || {};
+        const planText = extractPlanFromPipeline(p);
+        const phase = (p.phase_index != null && p.phase_total != null)
+            ? t('gatePhase', { i: p.phase_index + 1, total: p.phase_total }) : '';
+
+        const head = document.createElement('div');
+        head.className = 'gate-card-head';
+        head.textContent = gateStepTitle('pk', p);
+        card.appendChild(head);
+
+        if (phase) {
+            const ph = document.createElement('div');
+            ph.className = 'gate-card-phase';
+            ph.textContent = phase;
+            card.appendChild(ph);
+        }
+        if (planText) {
+            const body = document.createElement('pre');
+            body.className = 'gate-card-body';
+            body.textContent = planText;
+            card.appendChild(body);
+        }
+        // 6.5.3 artifact 计划视图：异步取回并展示（不阻塞卡片渲染）
+        const artifactBox = document.createElement('div');
+        artifactBox.className = 'gate-card-artifact';
+        card.appendChild(artifactBox);
+        loadArtifactView(p, artifactBox);
+        // 操作区
+        const actions = document.createElement('div');
+        actions.className = 'gate-card-actions';
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'gate-btn gate-confirm';
+        confirmBtn.textContent = t('confirmBtn');
+        confirmBtn.addEventListener('click', () => {
+            queueSynthPipelineReturn(p.id, 'confirm');
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'gate-btn gate-reject';
+        rejectBtn.textContent = t('rejectBtn');
+        const opinion = document.createElement('input');
+        opinion.type = 'text';
+        opinion.className = 'gate-opinion';
+        opinion.placeholder = t('rejectOpinionPh');
+        rejectBtn.addEventListener('click', () => {
+            queueSynthPipelineReturn(p.id, 'reject', opinion.value.trim() || undefined);
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        const regenBtn = document.createElement('button');
+        regenBtn.className = 'gate-btn gate-regen';
+        regenBtn.textContent = t('regenerateBtn');
+        regenBtn.addEventListener('click', () => {
+            queueSynthPipelineReturn(p.id, 'regenerate');
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        const abortBtn = document.createElement('button');
+        abortBtn.className = 'gate-btn gate-abort';
+        abortBtn.textContent = t('abortBtn');
+        abortBtn.addEventListener('click', () => {
+            queueSynthPipelineReturn(p.id, 'abort');
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        actions.append(confirmBtn, rejectBtn, opinion, regenBtn, abortBtn);
+        card.appendChild(actions);
+
+    } else if (evt.kind === 'ck') {
+        const head = document.createElement('div');
+        head.className = 'gate-card-head';
+        head.textContent = gateStepTitle('ck');
+        card.appendChild(head);
+
+        const hint = document.createElement('div');
+        hint.className = 'gate-card-phase';
+        hint.textContent = t('gateContextParked');
+        card.appendChild(hint);
+
+        const editor = document.createElement('textarea');
+        editor.className = 'gate-card-editor';
+        editor.value = JSON.stringify(evt.context || {}, null, 2);
+
+        const actions = document.createElement('div');
+        actions.className = 'gate-card-actions';
+
+        const amendBtn = document.createElement('button');
+        amendBtn.className = 'gate-btn gate-confirm';
+        amendBtn.textContent = t('amendBtn');
+        amendBtn.addEventListener('click', async () => {
+            try {
+                const edited = JSON.parse(editor.value);
+                await amendGateContext(evt.context_id, { context: edited });
+                card.replaceWith(doneBanner());
+                notifyGateAction();
+            } catch (e) {
+                editor.classList.add('gate-editor-err');
+                showError(t('uploadFailed', { msg: e.message }));
+            }
+        });
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'gate-btn gate-reject';
+        rejectBtn.textContent = t('rejectBtn');
+        rejectBtn.addEventListener('click', () => {
+            amendGateContext(evt.context_id, { context: { aborted: true } }).catch(() => {});
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        const abortBtn = document.createElement('button');
+        abortBtn.className = 'gate-btn gate-abort';
+        abortBtn.textContent = t('abortBtn');
+        abortBtn.addEventListener('click', () => {
+            amendGateContext(evt.context_id, { context: { aborted: true } }).catch(() => {});
+            card.replaceWith(doneBanner());
+            notifyGateAction();
+        });
+
+        actions.append(amendBtn, rejectBtn, abortBtn);
+        card.append(editor, actions);
+    } else {
+        return;   // 未知类型不渲染
+    }
+
+    mount.appendChild(card);
+}
+
+function doneBanner() {
+    const d = document.createElement('div');
+    d.className = 'gate-done';
+    d.textContent = t('gateActionDone');
+    return d;
+}
+
+// 6.5.3 artifact 计划视图：异步取回 artifact 并渲染（不阻塞卡片渲染）
+// p: synth_pipeline 对象（含 artifact_ref 或 id）
+async function loadArtifactView(p, box) {
+    if (!runtimeConfig.enableSynthLoop) return;
+    const loading = document.createElement('div');
+    loading.className = 'gate-artifact-loading';
+    loading.textContent = t('artifactLoading');
+    box.appendChild(loading);
+
+    try {
+        const items = [];
+        if (p.artifact_ref) {
+            try { items.push(await fetchArtifact(p.artifact_ref)); } catch (e) { /* 单条失败不影响列表 */ }
+        }
+        if (p.id) {
+            try {
+                const lst = await listPipelineArtifacts(p.id);
+                if (lst && Array.isArray(lst.items)) items.push(...lst.items);
+                else if (Array.isArray(lst)) items.push(...lst);
+            } catch (e) { /* 列表端点可能未实现 */ }
+        }
+
+        box.removeChild(loading);
+        const title = document.createElement('div');
+        title.className = 'gate-artifact-title';
+        title.textContent = t('artifactView');
+        box.appendChild(title);
+
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'gate-artifact-empty';
+            empty.textContent = t('artifactEmpty');
+            box.appendChild(empty);
+            return;
+        }
+
+        items.forEach((art) => {
+            const node = renderArtifactNode(art);
+            if (node) box.appendChild(node);
+        });
+    } catch (e) {
+        if (loading.parentNode) loading.textContent = t('uploadFailed', { msg: e.message });
+    }
+}
+
+// 渲染单个 artifact 节点：人读摘要（content）+ 可折叠完整数据（data）
+function renderArtifactNode(art) {
+    if (!art || typeof art !== 'object') return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'gate-artifact-item';
+
+    const name = document.createElement('div');
+    name.className = 'gate-artifact-name';
+    name.textContent = (art.name || art.id || t('artifactView'));
+    wrap.appendChild(name);
+
+    if (art.content) {
+        const sum = document.createElement('div');
+        sum.className = 'gate-artifact-summary';
+        sum.textContent = art.content;
+        wrap.appendChild(sum);
+    }
+    if (art.data != null) {
+        const details = document.createElement('details');
+        details.className = 'gate-artifact-data';
+        const sumEl = document.createElement('summary');
+        sumEl.textContent = t('artifactData');
+        const pre = document.createElement('pre');
+        pre.textContent = (typeof art.data === 'string') ? art.data : JSON.stringify(art.data, null, 2);
+        details.append(sumEl, pre);
+        wrap.appendChild(details);
+    }
+    return wrap;
+}
+
+// 用户操作闸后，通知 sl-chat 自动推进下一轮（空消息带回传）
+function notifyGateAction() {
+    document.dispatchEvent(new CustomEvent('gateAction', { detail: {} }));
+}
+
+
+// ---- sl-context.js ----
+// ========== sl-context.js ==========
+// synth-loop 【数据面】通道（packets 临时区 + longdata 永久区）。
+// 重要区分（5.5 纠偏）：
+//   - 本文件是【数据面】：用户主动往系统喂"上下文原料"（doc/memory/传感器/网页…），
+//     属于独立的常驻管理 UI，与闸流程无关。
+//   - 【ck 推理闸上下文编辑】是另一回事：由 ck 闸（gate:"pending"）唤起，编辑被 park 的
+//     context 后 amend（见 sl-gate.js 的 amendGateContext）。它不是数据面注入。
+// 本文件只做数据链接：直接对接 synth-loop REST 契约，不含任何 UI。
+// UI（数据面管理面板）留待 Phase 6.5（联调前专门处理）。
+// 依赖（同 <script> 共享作用域）：runtimeConfig / getSynthSessionId
+
+// ---------- 工具：由 chat baseUrl 推导 API 根 ----------
+// runtimeConfig.baseUrl 形如 "http://127.0.0.1:13155/v1/chat/completions"
+// 或 "/v1/chat/completions"（同源相对），截掉 "/chat/completions" 得 "/v1"
+function slApiRoot() {
+    const base = (runtimeConfig.baseUrl || '').trim();
+    const marker = '/chat/completions';
+    const idx = base.lastIndexOf(marker);
+    return idx !== -1 ? base.slice(0, idx) : base;   // 无后缀则原样（兼容已填根地址）
+}
+
+// 服务根（不含 /v1 前缀）：用于 chatgate（根路径）/ artifacts（/api/v1 路径）等
+// 不在 /v1 下的端点。slApiRoot() 返回 /v1，这里剥掉末尾 /v1 得服务根。
+// 例：baseUrl=/v1/chat/completions → slApiRoot()=/v1 → slApiOrigin()='/'（同源相对）
+//    baseUrl=http://host:13155/v1/chat/completions → slApiOrigin()='http://host:13155'
+function slApiOrigin() {
+    const root = slApiRoot().replace(/\/v1$/, '');
+    return root || '/';
+}
+
+async function slApiFetch(path, options) {
+    const url = slApiRoot() + path;
+    const headers = { 'Content-Type': 'application/json', ...runtimeConfig.headers };
+    // 与 sendToLLM 对齐：启用 synth-loop 且已有会话时带 session 头，保证数据面与会话一致
+    if (runtimeConfig.enableSynthLoop && typeof getSynthSessionId === 'function' && getSynthSessionId()) {
+        headers['x-synthloop-session-id'] = getSynthSessionId();
+    }
+    const res = await fetch(url, { ...options, headers });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* 空响应 */ }
+    if (!res.ok) {
+        const msg = (data && (data.error || data.detail)) || ('HTTP ' + res.status);
+        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+}
+
+// ---------- packets 临时区 ----------
+// 待注入当前会话的 packet id 列表（会话级，Clean 时清空）
+let pendingPacketIds = [];
+
+// POST /v1/packets  { source, type, payload, meta } → { packet_id }
+async function submitPacket({ source = 'sl-web-chat', type, payload = {}, meta = {} } = {}) {
+    if (!type) throw new Error('packet type required');
+    // slApiRoot() 已含 /v1 前缀（由 baseUrl 截出），path 不再带 /v1，避免 /v1/v1 重复
+    const data = await slApiFetch('/packets', {
+        method: 'POST',
+        body: JSON.stringify({ source, type, payload, meta })
+    });
+    if (data && data.packet_id) pendingPacketIds.push(data.packet_id);  // 自动入待注入队列
+    return data.packet_id;
+}
+
+function getPendingPacketIds() { return pendingPacketIds.slice(); }
+function clearPendingPacketIds() { pendingPacketIds = []; }
+
+// ---------- longdata 永久区 ----------
+// POST /v1/longdata  { session_id, type, content } → result
+async function addLongdata({ type, content, session_id = getSynthSessionId() } = {}) {
+    if (!session_id) throw new Error('session_id required (先发起一次对话以建立会话)');
+    if (!type || !content) throw new Error('type & content required');
+    return await slApiFetch('/longdata', {
+        method: 'POST',
+        body: JSON.stringify({ session_id, type, content })
+    });
+}
+
+// GET /v1/longdata?session_id= → { items: [...] }
+async function listLongdata(session_id = getSynthSessionId()) {
+    if (!session_id) throw new Error('session_id required');
+    return await slApiFetch('/longdata?session_id=' + encodeURIComponent(session_id), {
+        method: 'GET'
+    });
+}
+
+// DELETE /v1/longdata/{id}?session_id= → result（后端按 id+session 双重校验）
+async function deleteLongdata({ id, session_id = getSynthSessionId() } = {}) {
+    if (!session_id || !id) throw new Error('id & session_id required');
+    return await slApiFetch('/longdata/' + encodeURIComponent(id) + '?session_id=' + encodeURIComponent(session_id), {
+        method: 'DELETE'
+    });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        slApiRoot, slApiOrigin, submitPacket, addLongdata, listLongdata, deleteLongdata,
+        getPendingPacketIds, clearPendingPacketIds
+    };
+}
+
+
+// ---- sl-chat.js ----
+// ========== sl-chat.js ==========
+// 会话历史 / 资源渲染 / 文件上传 / 提交主链 / Clean / 初始化
+// 裁剪自 tc-chat.js：删除 tc 免打扰轮（initQuietBridge）、AI: 指令解析、tc 发现/状态灯。
+//   synth-loop 的闸（pk 三闸 / ck 上下文闸）由后端在 chat 响应字段里暴露，壳只渲染+回传，
+//   协议解析权留后端（见 concept_zh.md §二）。
+// 依赖（同 <script> 共享作用域）：t / runtimeConfig / buildSystemPrompts
+
+// ---------- 会话状态 ----------
+// §3.2.1 SYSTEM_PROMPTS 注入：作为 conversationHistory 起始的 system 消息（位置占位，最后一期定）
+let conversationHistory = buildSystemPrompts().map((c) => ({ role: 'system', content: c }));
+let pendingAttachments = [];
+// synth-loop 会话标识：首轮不传 → 读响应头 x-synthloop-session-id 存入 → 后续轮复用（Header）
+//   同时供 Phase 3 longdata 以 body.session_id 复用同一会话（见 concept §六 / 开发计划 2.2）
+let synthSessionId = null;
+
+// DOM 句柄（由 sl-integrate.js 在 DOMContentLoaded 后绑定；此处延迟取）
+let messagesContainer, chatForm, userInput, statusElement, errorElement, attachmentsTray, uploadBtn, fileInput, cleanBtn;
+
+// ---------- 资源渲染（<resources> 协议） ----------
+const SECURITY = { whitelistEnabled: false, allowedHosts: [] };
+
+function parseResources(content) {
+    if (typeof content !== 'string') return null;
+    const m = content.match(/^\s*<resources>([\s\S]*?)<\/resources>\s*$/);
+    if (!m) return null;
+    try {
+        const arr = JSON.parse(m[1].trim().replace(/'/g, '"'));
+        return Array.isArray(arr) ? arr : [arr];
+    } catch (e) { return null; }
+}
+
+function detectType(url) {
+    const u = String(url).split('?')[0].toLowerCase();
+    if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)$/.test(u)) return 'image';
+    if (/\.(mp4|webm|ogg|mov|m4v)$/.test(u)) return 'video';
+    if (/\.(mp3|wav|m4a|aac)$/.test(u)) return 'audio';
+    if (/\.pdf$/.test(u)) return 'pdf';
+    return 'webpage';
+}
+
+function safeUrl(url) {
+    try {
+        const u = new URL(url, location.href);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        if (SECURITY.whitelistEnabled && !SECURITY.allowedHosts.includes(u.hostname)) return null;
+        return u.href;
+    } catch (e) { return null; }
+}
+
+function fileName(url) {
+    try {
+        const u = new URL(url, location.href);
+        const parts = u.pathname.split('/');
+        return decodeURIComponent(parts[parts.length - 1]) || 'resource';
+    } catch (e) { return 'resource'; }
+}
+
+function invalidResource(url) {
+    const ph = document.createElement('div');
+    ph.className = 'media-invalid';
+    ph.textContent = t('invalidResource', url);
+    return ph;
+}
+
+function brokenImage() {
+    const ph = document.createElement('div');
+    ph.className = 'media-broken';
+    ph.textContent = t('brokenImage');
+    return ph;
+}
+
+function openLink(url) {
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.className = 'media-open-link';
+    a.textContent = t('openInNewTab');
+    return a;
+}
+
+function renderResource(url) {
+    const safe = safeUrl(url);
+    if (!safe) return invalidResource(url);
+    const type = detectType(safe);
+    if (type === 'image') {
+        const block = document.createElement('div');
+        block.className = 'media-item media-image-wrap';
+        const img = document.createElement('img');
+        img.className = 'media-image'; img.loading = 'lazy'; img.alt = fileName(safe);
+        img.addEventListener('error', () => img.replaceWith(brokenImage()));
+        img.src = safe; block.appendChild(img); return block;
+    }
+    if (type === 'video') {
+        const block = document.createElement('div'); block.className = 'media-item';
+        const v = document.createElement('video'); v.className = 'media-video'; v.controls = true; v.preload = 'none'; v.src = safe;
+        block.appendChild(v); return block;
+    }
+    if (type === 'audio') {
+        const block = document.createElement('div'); block.className = 'media-item';
+        const a = document.createElement('audio'); a.className = 'media-audio'; a.controls = true; a.preload = 'none'; a.src = safe;
+        block.appendChild(a); return block;
+    }
+    const block = document.createElement('div'); block.className = 'media-item';
+    const details = document.createElement('details'); details.className = 'media-embed';
+    const summary = document.createElement('summary');
+    summary.textContent = (type === 'pdf' ? t('mediaPdf') : t('mediaWeb')) + fileName(safe);
+    const body = document.createElement('div'); body.className = 'media-embed-body';
+    details.appendChild(summary); details.appendChild(body);
+    details.addEventListener('toggle', () => {
+        if (details.open && !body.dataset.built) {
+            body.dataset.built = '1';
+            const iframe = document.createElement('iframe');
+            iframe.className = 'media-iframe'; iframe.sandbox = 'allow-scripts allow-same-origin';
+            iframe.referrerPolicy = 'no-referrer'; iframe.src = safe;
+            body.appendChild(iframe); body.appendChild(openLink(safe));
+        }
+    });
+    block.appendChild(details); return block;
+}
+
+function renderGallery(list) {
+    const gallery = document.createElement('div'); gallery.className = 'media-gallery';
+    list.forEach((item) => {
+        const url = typeof item === 'string' ? item : (item && item.url);
+        if (!url) return; gallery.appendChild(renderResource(url));
+    });
+    return gallery;
+}
+
+function addMessage(role, content) {
+    const list = parseResources(content);
+    const messageDiv = document.createElement('div');
+    messageDiv.className = list ? 'message resource-message' : `message ${role}-message`;
+    if (list) messageDiv.appendChild(renderGallery(list));
+    else messageDiv.textContent = content;
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function showError(message) {
+    errorElement.textContent = message;
+    errorElement.style.display = 'block';
+}
+
+// ---------- LLM 请求（非流式 + 流式） ----------
+async function sendToLLM(messages) {
+    statusElement.textContent = t('thinking');
+    const requestHeaders = { ...runtimeConfig.headers };
+    // 2.2 session_id 对齐：仅启用 synth-loop 时带 x-synthloop-session-id，后端识别为同一会话
+    if (runtimeConfig.enableSynthLoop && synthSessionId) requestHeaders['x-synthloop-session-id'] = synthSessionId;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30000);
+    // 数据面临时区：发送前快照待注入 packet（消费即清空，避免下一轮重复带旧 packet）
+    const pendingPacketSnapshot = runtimeConfig.enableSynthLoop ? getPendingPacketIds() : [];
+    let response;
+    try {
+        response = await fetch(runtimeConfig.baseUrl, {
+            method: 'POST', headers: requestHeaders,
+            body: JSON.stringify({
+                model: runtimeConfig.model, messages: messages,
+                max_tokens: runtimeConfig.maxTokens, temperature: runtimeConfig.temperature, stream: true,
+                // 数据面注入：仅启用 synth-loop 时把已提交 packet id 透传给 chat（后端 _inject_packets 消费）
+                // 注意：这是【数据面】引用机制，不是 ck 闸的"上下文编辑"（5.5 纠偏）
+                // 4.2 pk 三闸回传：仅启用 synth-loop 时回带 synth_pipeline:{id,action}
+                //   注意必须包成 synth_pipeline 对象（后端 body.get('synth_pipeline')），
+                //   不能把 {id,action} 直接展开到顶层，否则后端拿不到回传、相位不推进。
+                ...(runtimeConfig.enableSynthLoop ? {
+                    packets: pendingPacketSnapshot,
+                    ...(() => {
+                        const ret = takePendingSynthPipelineReturn();
+                        return ret ? { synth_pipeline: ret } : {};
+                    })()
+                } : {})
+            }),
+            signal: ac.signal
+        });
+    } catch (e) { clearTimeout(timer); throw e; }
+    if (pendingPacketSnapshot.length) clearPendingPacketIds();   // 发送即消费
+    clearTimeout(timer);
+    if (!response.ok) {
+        let msg = `HTTP ${response.status}`;
+        try {
+            const errData = await response.json();
+            if (errData && errData.error && errData.error.message) msg = errData.error.message;
+        } catch (e) { /* ignore */ }
+        throw new Error(msg);
+    }
+    // 2.2 读回 session：仅启用 synth-loop 时后端注入 x-synthloop-session-id（首轮新建 / 后续复用）
+    if (runtimeConfig.enableSynthLoop) {
+        const returnedSession = response.headers.get('x-synthloop-session-id');
+        if (returnedSession) synthSessionId = returnedSession;
+    }
+    const ct = response.headers.get('content-type') || '';
+    if (ct.includes('text/event-stream')) {
+        // 流式：纯文本增量，无 synth_pipeline/gate 顶层字段（相位/闸分支为非流式，见 chat.py:301-331）
+        const full = await readStreaming(response);
+        if (typeof renderPendingGateCards === 'function') renderPendingGateCards();
+        return full;
+    }
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message || 'API返回错误');
+    // 4.x 闸字段解析：响应（非流式）可能携带 synth_pipeline（pk 三闸）或 gate:"pending"（ck 推理闸）
+    //   当前仅解析分流（UI 渲染留 Phase 6.5）；解析结果由 Phase 6.5 的 renderGateCard 消费
+    if (typeof parseGateFromResponse === 'function') {
+        const gate = parseGateFromResponse(data);
+        if (gate && gate.kind) {
+            // 暂存到会话级队列，供 Phase 6.5 UI 拉取渲染（此处不渲染，遵守"UI 留后"指令）
+            pushGateEvent(gate);
+        }
+    }
+    const message = (data.choices && data.choices[0] && data.choices[0].message) || {};
+    const content = message.content || '';
+    addMessage('assistant', content);
+    return content;
+}
+
+// 流式读取 SSE；收尾时 <resources> 整体替换为画廊。
+// §12.3.10 流结束兜底：对 fullText 在 done 后由 parseDirectives（含 EOL 兜底）统一收口。
+async function readStreaming(response) {
+    statusElement.textContent = t('streaming');
+    const bubble = document.createElement('div');
+    bubble.className = 'message assistant-message';
+    bubble.setAttribute('aria-live', 'off');
+    messagesContainer.appendChild(bubble);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = ''; let fullText = ''; let potentialResource = false;
+    const flush = () => { messagesContainer.scrollTop = messagesContainer.scrollHeight; };
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const rawEvent = buffer.slice(0, idx); buffer = buffer.slice(idx + 2);
+            const line = rawEvent.trim();
+            if (!line.startsWith('data:')) continue;
+            const dataStr = line.slice(5).trim();
+            if (dataStr === '[DONE]') continue;
+            let evt; try { evt = JSON.parse(dataStr); } catch (e) { continue; }
+            const choice = (evt.choices && evt.choices[0]) || {};
+            const delta = choice.delta || {};
+            if (delta.content) {
+                fullText += delta.content;
+                const trimmed = fullText.trimStart();
+                if (/^\s*<resources[\s>]/.test(trimmed)) {
+                    potentialResource = true; bubble.textContent = '';
+                } else if (!potentialResource) {
+                    bubble.textContent = fullText;
+                }
+                flush();
+            }
+        }
+    }
+    if (potentialResource) {
+        const list = parseResources(fullText);
+        if (list) {
+            const galleryMsg = document.createElement('div');
+            galleryMsg.className = 'message resource-message';
+            galleryMsg.appendChild(renderGallery(list));
+            bubble.replaceWith(galleryMsg);
+        } else { bubble.textContent = fullText; }
+    }
+    bubble.setAttribute('aria-live', 'polite');
+    return fullText; // §12.3.10：调用方可对 fullText 跑 parseDirectives 收尾
+}
+
+// ---------- 文件上传 + 多模态附件 ----------
+function resolveUploadUrl() {
+    const cdn = (runtimeConfig.cdnUrl || '').trim().replace(/\/+$/, '');
+    if (cdn) return cdn + '/upload';
+    try {
+        const b = new URL(runtimeConfig.baseUrl, location.href);
+        return (b.origin || location.origin) + '/upload';
+    } catch (e) { return location.origin + '/upload'; }
+}
+
+function mediaPartFor(type, url) {
+    if (type === 'image') return { type: 'image_url', image_url: { url } };
+    if (type === 'video') return { type: 'video_url', video_url: { url } };
+    if (type === 'audio') return { type: 'audio_url', audio_url: { url } };
+    return { type: 'file_url', file_url: { url } };
+}
+
+function makeChip(att, withRemove, index) {
+    const chip = document.createElement('div'); chip.className = 'att-chip att-' + att.type;
+    if (att.type === 'image') {
+        const img = document.createElement('img'); img.src = att.url; img.alt = att.name; img.className = 'att-thumb';
+        chip.appendChild(img);
+    } else {
+        const icon = document.createElement('span'); icon.className = 'att-icon';
+        icon.textContent = att.type === 'video' ? '🎬' : att.type === 'audio' ? '🔊' : '📄';
+        chip.appendChild(icon);
+    }
+    const name = document.createElement('span'); name.className = 'att-name'; name.textContent = att.name; name.title = att.name;
+    chip.appendChild(name);
+    if (withRemove) {
+        const x = document.createElement('button'); x.type = 'button'; x.className = 'att-remove';
+        x.setAttribute('aria-label', t('removeAtt', att.name)); x.textContent = '×';
+        x.addEventListener('click', () => removeAttachment(index));
+        chip.appendChild(x);
+    }
+    return chip;
+}
+
+function renderAttachmentsTray() {
+    attachmentsTray.innerHTML = '';
+    if (pendingAttachments.length === 0) { attachmentsTray.style.display = 'none'; return; }
+    attachmentsTray.style.display = 'flex';
+    pendingAttachments.forEach((att, i) => attachmentsTray.appendChild(makeChip(att, true, i)));
+}
+
+function removeAttachment(i) { pendingAttachments.splice(i, 1); renderAttachmentsTray(); }
+
+function addUserBubble(text, attachments) {
+    const div = document.createElement('div'); div.className = 'message user-message';
+    if (text) { const p = document.createElement('div'); p.textContent = text; div.appendChild(p); }
+    if (attachments && attachments.length) {
+        const tray = document.createElement('div'); tray.className = 'att-inline';
+        attachments.forEach((att) => tray.appendChild(makeChip(att, false, -1)));
+        div.appendChild(tray);
+    }
+    messagesContainer.appendChild(div);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+async function uploadFile(file) {
+    // 选项 A：关闭 synth-loop 时走纯 OpenAI 多模态标准——文件读成 base64 data URL 内联，不依赖 /upload 端点
+    if (!runtimeConfig.enableSynthLoop) {
+        try {
+            const dataUrl = await readFileAsDataUrl(file);
+            pendingAttachments.push({ url: dataUrl, name: file.name, type: detectType(file.name) });
+            renderAttachmentsTray();
+            statusElement.textContent = t('statusReady');
+        } catch (e) {
+            console.error('读取文件失败:', e);
+            showError(t('uploadFailed', { msg: e.message }));
+            statusElement.textContent = t('statusReady');
+        }
+        return;
+    }
+    // 启用 synth-loop：走数据面临时区 packets（6.5.1.x）——不是 /upload，也不是内联 attachment
+    // 选文件 → submitPacket 拿 packet_id → 自动进 pendingPacketIds → 发送时 sendToLLM 注入 packets:[id]
+    // 壳不维护 packets 列表（后端 TTL 自动维护），仅给计数反馈
+    statusElement.textContent = t('uploading', file.name);
+    try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const type = packetTypeFromFile(file);   // 扩展名 → packet type
+        const id = await submitPacket({
+            type,
+            payload: { name: file.name, mime: file.type || 'application/octet-stream', data: dataUrl },
+            meta: { source: 'sl-web-chat-upload' }
+        });
+        if (!id) throw new Error('packet response missing packet_id');
+        statusElement.textContent = t('packetQueued', getPendingPacketIds().length);
+    } catch (e) {
+        console.error('提交 packet 失败:', e);
+        showError(t('uploadFailed', { msg: e.message }));
+        statusElement.textContent = t('statusReady');
+    }
+}
+
+// 扩展名 → packet type（synth-loop /v1/packets 的 type 命名空间）
+function packetTypeFromFile(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const map = {
+        txt: 'doc', md: 'doc', pdf: 'doc', doc: 'doc', docx: 'doc',
+        png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image',
+        mp3: 'audio', wav: 'audio', ogg: 'audio',
+        mp4: 'video', webm: 'video', mov: 'video',
+        json: 'data', csv: 'data', xml: 'data'
+    };
+    return map[ext] || 'doc';
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+        reader.readAsDataURL(file);
+    });
+}
+
+// ---------- 处理一轮 LLM 完整文本：纯文本呈现 ----------
+// synth-loop 的闸（pk/ck）不走前端解析，由后端在 chat 响应字段暴露，壳只渲染+回传。
+async function handleAssistantTurn(fullText) {
+    if (fullText && fullText.trim()) {
+        addMessage('assistant', fullText);
+    }
+}
+
+// ---------- 提交主链 ----------
+// 核心提交逻辑（userMessage 可为空：闸回传推进时为空文本，但带 pendingSynthPipelineReturn）
+async function submitChat(userMessage) {
+    if (!userMessage && pendingAttachments.length === 0 && getPendingPacketIds().length === 0 && !hasPendingSynthPipelineReturn()) return;
+    userInput.disabled = true;
+    const submitBtn = chatForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    let content;
+    if (pendingAttachments.length === 0) content = userMessage;
+    else {
+        content = [{ type: 'text', text: userMessage }];
+        pendingAttachments.forEach((att) => content.push(mediaPartFor(att.type, att.url)));
+    }
+    try {
+        addUserBubble(userMessage, pendingAttachments);
+        conversationHistory.push({ role: 'user', content });
+        userInput.value = ''; userInput.style.height = 'auto';
+        pendingAttachments = []; renderAttachmentsTray();
+        // 渲染由 sendToLLM 内部完成（非流式 addMessage / 流式 readStreaming bubble），
+        // 此处不再调用 handleAssistantTurn，避免"每条消息渲染两条回复"的重复。
+        const assistantResponse = await sendToLLM(conversationHistory);
+        conversationHistory.push({ role: 'assistant', content: assistantResponse });
+        // 6.5.2：每轮回答后渲染待处理闸卡片（消费 pendingGateEvents）
+        renderPendingGateCards();
+        const MAX_HISTORY = 100;
+        if (conversationHistory.length > MAX_HISTORY) {
+            conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+        }
+    } catch (error) {
+        console.error('请求失败:', error);
+        let detail;
+        // §12.3.9：fetch 网络层失败（TypeError）→ 说人话，不污染协议层
+        if (error instanceof TypeError || error.name === 'TypeError') {
+            detail = '无法连接到 ' + runtimeConfig.baseUrl + '。\n' +
+                '• 确认后端已启动\n' +
+                '• 若以 file:// 双击打开，请将 localhost 改为 127.0.0.1\n' +
+                '• 或直接用浏览器访问 http://127.0.0.1:8000/ （同源，免跨域）';
+        } else { detail = error.message; }
+        showError(t('requestFailed', { msg: detail }));
+    } finally {
+        userInput.disabled = false; submitBtn.disabled = false;
+        userInput.focus(); statusElement.textContent = t('statusReady');
+    }
+}
+
+function bindChatForm() {
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitChat(userInput.value.trim());
+    });
+    // 6.5.2：闸卡片操作后自动推进下一相位（空消息带回传）
+    document.addEventListener('gateAction', () => {
+        submitChat('');
+    });
+}
+
+// ---------- Clean：清空会话 ----------
+function bindCleanBtn() {
+    cleanBtn.addEventListener('click', () => {
+        messagesContainer.innerHTML = '';
+        pendingAttachments = []; renderAttachmentsTray();
+        errorElement.style.display = 'none';
+        conversationHistory = buildSystemPrompts().map((c) => ({ role: 'system', content: c }));
+        synthSessionId = null;   // 2.2 清空会话同时重置 session，避免串会话
+        clearPendingPacketIds(); // 3.1 清空待注入 packet 队列
+        pendingGateEvents = [];  // 4.x 清空未消费的闸事件
+        resetDataPanelState();   // 6.5.1 清空数据面本地条目（后端按 session 失效，下次打开重拉）
+        statusElement.textContent = t('statusReady');
+        userInput.focus();
+    });
+}
+
+// ---------- 初始化 ----------
+function bindUpload() {
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const files = Array.from(fileInput.files || []);
+        fileInput.value = '';
+        for (const f of files) await uploadFile(f);
+    });
+}
+
+function autoGrow() {
+    userInput.style.height = 'auto';
+    const max = Math.round(window.innerHeight * 0.4);
+    userInput.style.height = Math.min(userInput.scrollHeight, max) + 'px';
+}
+
+function bindInput() {
+    userInput.addEventListener('input', autoGrow);
+    userInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault(); chatForm.requestSubmit();
+        }
+    });
+}
+
+// 由 sl-integrate.js 在 DOM 就绪后调用：抓取 DOM 句柄 + 绑定事件
+function initChatDom() {
+    messagesContainer = document.getElementById('messages');
+    chatForm = document.getElementById('chatForm');
+    userInput = document.getElementById('userInput');
+    statusElement = document.getElementById('status');
+    errorElement = document.getElementById('error');
+    attachmentsTray = document.getElementById('attachmentsTray');
+    uploadBtn = document.getElementById('uploadBtn');
+    fileInput = document.getElementById('fileInput');
+    cleanBtn = document.getElementById('cleanBtn');
+    bindChatForm(); bindCleanBtn(); bindUpload(); bindInput();
+}
+
+async function onAppLoad() {
+    applyLang(currentLang);
+    if (typeof loadConfigToForm === 'function') loadConfigToForm();
+    // 初始化会话标识：数据面（longdata/packets）不依赖"先发 chat"，开屏即具备稳定 session
+    if (!synthSessionId && runtimeConfig.enableSynthLoop) {
+        synthSessionId = 's_local_' + Math.random().toString(36).slice(2, 10);
+    }
+    initChatDom();
+    addMessage('assistant', t('greeting'));
+    statusElement.textContent = t('statusReady');
+}
+
+// 顶层函数声明：浏览器内联（module 为 undefined 时 module.exports 不执行）下，
+// 也必须让 sl-context.js / sl-integrate.js 能通过共享作用域访问到 getSynthSessionId。
+// （否则 addLongdata 等调用 ReferenceError：getSynthSessionId is not defined）
+function getSynthSessionId() { return synthSessionId; }
+function setSynthSessionId(id) { synthSessionId = id; }
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        handleAssistantTurn, onAppLoad, initChatDom,
+        getConversationHistory: () => conversationHistory,
+        setConversationHistory: (h) => { conversationHistory = h; },
+        getSynthSessionId, setSynthSessionId
+    };
+}
+
+
+// ---- sl-integrate.js ----
+// ========== sl-integrate.js ==========
+// 唯一胶水层：知道 HTML 结构，绑定所有 DOM 事件，串起各源模块。
+// 裁剪自 tc-integrate.js：删除 tc 专属配置字段（端点/令牌/scope/人闸三态下拉），
+//   改由 sl 的闸管理 UI（sl-gate.js）与上下文编辑 UI（sl-context.js）承担。
+// 依赖（同 <script> 共享作用域）：runtimeConfig / saveConfig / loadConfigToForm /
+//   t / LANGS / applyLang / bindLangButtons / onAppLoad / showError
+
+// ---------- 配置面板（仅通用项：baseUrl / model / headers / cdn） ----------
+function bindConfigPanel() {
+    const toggleConfigBtn = document.getElementById('toggleConfig');
+    const configPanel = document.getElementById('configPanel');
+    const toggleHeadersBtn = document.getElementById('toggleHeaders');
+    const headersEditor = document.getElementById('headersEditor');
+    const toggleCdnBtn = document.getElementById('toggleCdn');
+    const cdnEditor = document.getElementById('cdnEditor');
+    const saveConfigBtn = document.getElementById('saveConfig');
+    const cancelConfigBtn = document.getElementById('cancelConfig');
+    const cfgBaseUrl = document.getElementById('cfgBaseUrl');
+    const cfgModel = document.getElementById('cfgModel');
+    const cfgHeaders = document.getElementById('cfgHeaders');
+    const cfgCdn = document.getElementById('cfgCdn');
+    const cfgEnableSynthLoop = document.getElementById('cfgEnableSynthLoop');
+    const errorElement = document.getElementById('error');
+
+    loadConfigToForm = function () {
+        cfgBaseUrl.value = runtimeConfig.baseUrl;
+        cfgModel.value = runtimeConfig.model;
+        cfgHeaders.value = JSON.stringify(runtimeConfig.headers, null, 2);
+        cfgCdn.value = JSON.stringify({ cdn_url: runtimeConfig.cdnUrl }, null, 2);
+        if (cfgEnableSynthLoop) cfgEnableSynthLoop.checked = !!runtimeConfig.enableSynthLoop;
+        syncLangSelect();
+        applyLang(currentLang);
+        applySynthLoopMode();
+    };
+
+    toggleConfigBtn.addEventListener('click', () => {
+        if (!configPanel.classList.contains('show')) loadConfigToForm();
+        configPanel.classList.toggle('show');
+    });
+    toggleHeadersBtn.addEventListener('click', () => headersEditor.classList.toggle('show'));
+    toggleCdnBtn.addEventListener('click', () => cdnEditor.classList.toggle('show'));
+    cancelConfigBtn.addEventListener('click', () => {
+        configPanel.classList.remove('show'); headersEditor.classList.remove('show');
+    });
+
+    saveConfigBtn.addEventListener('click', () => {
+        const baseUrl = cfgBaseUrl.value.trim();
+        if (!baseUrl) { showError(t('baseUrlEmpty')); return; }
+        try {
+            const parsedHeaders = JSON.parse(cfgHeaders.value.trim());
+            runtimeConfig.baseUrl = baseUrl;
+            runtimeConfig.model = cfgModel.value.trim() || 'default-model';
+            runtimeConfig.headers = parsedHeaders;
+            if (cfgEnableSynthLoop) runtimeConfig.enableSynthLoop = !!cfgEnableSynthLoop.checked;
+            try {
+                const parsedCdn = JSON.parse(cfgCdn.value.trim());
+                runtimeConfig.cdnUrl = (parsedCdn.cdn_url || '').trim();
+            } catch (e) { runtimeConfig.cdnUrl = ''; }
+
+            errorElement.textContent = t('configSaved');
+            errorElement.style.background = '#e8f5e9';
+            errorElement.style.color = '#2e7d32';
+            errorElement.style.display = 'block';
+            setTimeout(() => {
+                errorElement.style.display = 'none';
+                errorElement.style.background = '#ffebee';
+                errorElement.style.color = '#d32f2f';
+            }, 2000);
+            configPanel.classList.remove('show');
+            headersEditor.classList.remove('show');
+            saveConfig(runtimeConfig);
+        } catch (e) {
+            showError(t('headersJsonErr', e.message));
+        }
+    });
+}
+
+// 填充并同步所有语言下拉（头部 langSelect + 面板 langSelectCfg）
+function syncLangSelect() {
+    ['langSelect', 'langSelectCfg'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            if (!el.options.length) el.innerHTML = buildLangOptions();
+            el.value = currentLang;
+        }
+    });
+}
+
+// ---------- 语言下拉（头部 + 面板双实例都绑） ----------
+function bindUiControls() {
+    ['langSelect', 'langSelectCfg'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', () => applyLang(el.value));
+    });
+}
+
+// ---------- synth-loop 模式开关：显隐仅 synth 专属的 UI ----------
+// data-sl-only 标记的元素（📂 Data 按钮 / Configure CDN / synth 开关行本身不被隐藏——它是开关）
+function applySynthLoopMode() {
+    const on = !!runtimeConfig.enableSynthLoop;
+    document.querySelectorAll('[data-sl-only]').forEach((el) => {
+        el.style.display = on ? '' : 'none';
+    });
+    // 关闭时若数据面正展开则收起
+    if (!on) {
+        const panel = document.getElementById('dataPanel');
+        if (panel) panel.classList.remove('show');
+    }
+}
+
+// ---------- 数据面：永久区 longdata 常驻侧栏（Phase 6.5.1） ----------
+// 形态：侧栏列表 + 添加（基于类型建条目→填文本→提交→id 映射）/ 删除（关联 id→卸载）
+// 临时区 packets 不在此面板（走 uploadBtn，见 bindUploadBtn）。
+let longdataEntries = [];   // [{ localId, id, type, content }]
+let localSeq = 0;
+
+function renderLongdataList() {
+    const list = document.getElementById('longdataList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (longdataEntries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'ld-empty';
+        empty.textContent = t('ldEmpty');
+        list.appendChild(empty);
+        return;
+    }
+    longdataEntries.forEach((e) => {
+        const item = document.createElement('div');
+        item.className = 'ld-item';
+        const meta = document.createElement('div');
+        meta.className = 'ld-item-meta';
+        const type = document.createElement('span');
+        type.className = 'ld-type';
+        type.textContent = e.type;
+        const del = document.createElement('button');
+        del.className = 'ld-del';
+        del.textContent = '🗑';
+        del.title = t('deleteEntry');
+        del.addEventListener('click', () => removeLongdata(e.localId));
+        meta.appendChild(type);
+        meta.appendChild(del);
+        const content = document.createElement('div');
+        content.className = 'ld-content';
+        content.textContent = e.content;
+        item.appendChild(meta);
+        item.appendChild(content);
+        list.appendChild(item);
+    });
+}
+
+function appendLongdataForm() {
+    const list = document.getElementById('longdataList');
+    if (!list) return;
+    if (list.querySelector('.ld-form')) return;   // 已有一个待填表单
+    const form = document.createElement('div');
+    form.className = 'ld-form';
+    form.innerHTML =
+        '<select class="ld-type-select">' +
+        '  <option value="doc">' + t('typeDoc') + '</option>' +
+        '  <option value="memory">' + t('typeMemory') + '</option>' +
+        '</select>' +
+        '<textarea class="ld-content-input" placeholder="' + t('ldContentPh') + '"></textarea>' +
+        '<div class="ld-form-actions">' +
+        '  <button class="ld-form-submit">' + t('submitEntry') + '</button>' +
+        '  <button class="ld-form-cancel">' + t('cancelEntry') + '</button>' +
+        '</div>';
+    const ta = form.querySelector('.ld-content-input');
+    form.querySelector('.ld-form-submit').addEventListener('click', async () => {
+        const content = ta.value.trim();
+        const type = form.querySelector('.ld-type-select').value;
+        if (!content) { ta.focus(); return; }
+        try {
+            const r = await addLongdata({ type, content, session_id: getSynthSessionId() });
+            const id = (r && r.id) || ('ld_' + (++localSeq));
+            longdataEntries.push({ localId: ++localSeq, id, type, content });
+            renderLongdataList();
+        } catch (err) {
+            showError(t('ldAddErr', { msg: err.message }));
+        }
+    });
+    form.querySelector('.ld-form-cancel').addEventListener('click', () => form.remove());
+    list.insertBefore(form, list.firstChild);
+    ta.focus();
+}
+
+async function removeLongdata(localId) {
+    const idx = longdataEntries.findIndex((e) => e.localId === localId);
+    if (idx === -1) return;
+    const entry = longdataEntries[idx];
+    try {
+        await deleteLongdata({ id: entry.id, session_id: getSynthSessionId() });
+        longdataEntries.splice(idx, 1);
+        renderLongdataList();
+    } catch (err) {
+        showError(t('ldDelErr', { msg: err.message }));
+    }
+}
+
+async function refreshLongdataList() {
+    try {
+        const resp = await listLongdata(getSynthSessionId());
+        // listLongdata 返回 { session_id, items:[...] }；兼容直接数组
+        const items = (resp && Array.isArray(resp.items)) ? resp.items
+                    : (Array.isArray(resp) ? resp : []);
+        longdataEntries = items.map((it) => ({
+            localId: ++localSeq,
+            id: it.id,
+            type: it.type,
+            content: it.content
+        }));
+    } catch (err) {
+        longdataEntries = [];
+    }
+    renderLongdataList();
+}
+
+// Clean 时调用：清空本地 entries（后端按 session 失效，下次打开重新拉取）
+function resetDataPanelState() {
+    longdataEntries = [];
+    localSeq = 0;
+    renderLongdataList();
+}
+
+function bindDataPanel() {
+    const toggleBtn = document.getElementById('toggleDataPanel');
+    const panel = document.getElementById('dataPanel');
+    const addBtn = document.getElementById('addLongdataBtn');
+    if (toggleBtn && panel) {
+        toggleBtn.addEventListener('click', () => {
+            if (!runtimeConfig.enableSynthLoop) return;   // 纯 OpenAI 模式无数据面
+            const showing = panel.classList.toggle('show');
+            if (showing) refreshLongdataList();
+        });
+    }
+    if (addBtn) addBtn.addEventListener('click', appendLongdataForm);
+    renderLongdataList();
+}
+
+// ---------- 全部绑定 + 启动 ----------
+function bootSlWebChat() {
+    bindConfigPanel();
+    bindUiControls();
+    bindDataPanel();
+    // 聊天 DOM + 事件由 sl-chat.js 的 initChatDom 负责（它也在 onAppLoad 调）
+    window.addEventListener('DOMContentLoaded', () => {
+        onAppLoad();
+    });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { bindConfigPanel, bindUiControls, bootSlWebChat };
+}
+
+
+// ---- bootstrap ----
+bootSlWebChat();
+
+</script>
+</body>
+</html>

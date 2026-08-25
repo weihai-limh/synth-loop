@@ -1,7 +1,7 @@
 # synth-loop 产品文档
 
 > **文档类型**：产品设计
-> **版本**：v0.1.2_c | **日期**：2026-08-24
+> **版本**：v0.1.2_d | **日期**：2026-08-25
 > **适用范围**：synth-loop
 > **关联文档**：`design_zh.md`、`api_zh.md`
 >
@@ -20,7 +20,7 @@
 5. **相位推理**：复杂任务拆为分形相位树——结构分形（复杂）/链式分形（中等），规划→路径确认→执行→摘要，每相位可闸审查
 6. **统一闸**：gate_manager 跨内核编排——相位路径确认/审批（pk 人闸）+ 上下文干预（ck 推理闸）+ 闸开关（元闸），所有 chat 上下文可被闸优化
 
-技术组件（`src/app/services/` + `src/app/kernels/`）：
+技术组件（`src/sl-py/app/services/` + `src/sl-py/app/kernels/`）：
 
 | 组件 | 代码 | 职责 |
 |------|------|------|
@@ -31,7 +31,7 @@
 | 相位内核 | `kernels/phase_kernel/`（ vendored） | 分形相位树 + 三闸 + 检查点 + 推理缝 |
 | 推理缝 | `inference_seam.py` | SlInferenceSeam：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸 |
 | 统一闸 | `gate_manager.py` | 跨内核闸编排：GateType 五类 + 组合函数 + 跨内核循环 |
-| 任务链执行器 | `task_chain_executor.py` | plan → execute → verify → summarize |
+| 任务链服务 | `task_chain_service.py`（v0.1.2_d 新增，取代已删 `task_chain_executor.py` #6 红线） | 单步闭环：写 tasks 表(queued)→委托 text-cli --async→轮询→确认闸(内部 `_dispatch_confirm`)→回写(completed/error)，承接 G3 落库责任 |
 | 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
 | 协议翻译 | `protocol_translator.py` | Anthropic ↔ OpenAI 格式互转 |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |

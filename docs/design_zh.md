@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v0.1.2_c | **日期**：2026-08-24
+> **版本**：v0.1.2_d | **日期**：2026-08-25
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -22,9 +22,9 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 
 | 是 | 不是 |
 |------|------|
-| 智能交换中枢——分派 + 收束（`src/app/services/sl_llm_provider.py` 唯一推理落点） | 匹配引擎（策略匹配由外部策略服务负责） |
-| 协议兼容端点——OpenAI + Anthropic 双协议接入（`src/app/services/protocol_translator.py`） | API 代理/中立网关——不做请求透传，每个请求都经历编排决策 |
-| 上下文内核承接方——ck 六层拼装 + 闸监听（`src/app/kernels/context_kernel/`） | LLM 框架（不封装 LLM 调用） |
+| 任务处理中枢——分派 + 收束（`src/sl-py/app/services/sl_llm_provider.py` 唯一推理落点） | 匹配引擎（策略匹配由外部策略服务负责） |
+| 协议兼容端点——OpenAI + Anthropic 双协议接入（`src/sl-py/app/services/protocol_translator.py`） | API 代理/中立网关——不做请求透传，每个请求都经历编排决策 |
+| 上下文内核承接方——ck 六层拼装 + 闸监听（`src/sl-py/app/kernels/context_kernel/`） | LLM 框架（不封装 LLM 调用） |
 | 任务处理者——分形路由、相位推理（pk）、统一闸管理、统一数据面 | 策略持有者（策略由外部策略服务管理） |
 
 ---
@@ -48,57 +48,55 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
               └────────────────────┘    └────────────────────┘  └──────────────────┘
 ```
 
-**设计依据**（`src/app/config.py` `PROJECT_ROOT` / `DEPLOY_DIR` / `SRC_DIR` 路径常量）：三组件通过 HTTP 解耦，每层可独立演进、独立替换。synth-loop 消费 strata-match 输出，不依赖其内部实现；可降级运行。
+**设计依据**（`src/sl-py/app/config.py` `PROJECT_ROOT` / `DEPLOY_DIR` / `SRC_DIR` 路径常量）：三组件通过 HTTP 解耦，每层可独立演进、独立替换。synth-loop 消费 strata-match 输出，不依赖其内部实现；可降级运行。
 
 ### 2.2 平面/分层
 
 | 平面 | 组件 | 职责 | 代码位置 |
 |------|------|------|---------|
-| **用户面** | 外部客户端 | 通过 OpenAI/Anthropic 协议发起请求 | 外部 |
-| **编排面** | synth-loop | 分形决策、策略注入、任务链推进、SSE 流式 | `src/app/` |
+| **用户面** | 外部客户端 | 通过 OpenAI/Anthropic 协议发起请求 | 外部 或壳`src/sl-web-chat/` |
+| **编排面** | synth-loop | 分形决策、策略注入、任务链推进、SSE 流式 | `src/sl-py/` |
 | **策略面** | strata-match | Prompt 匹配、skills 技能分片、工具定义、Assets | 外部服务 |
 | **执行面** | text-cli | 分布式指令执行、能力发现 | 外部服务 |
-| **管理面** | 管理面板 + 事件总线 | 会话监控、任务链追踪、Job 管理 | `src/public/` + `src/app/routers/admin.py` |
+| **调度管理面** | 管理面板 + 事件总线 | 会话监控、任务链追踪、Job 管理 | `src/sl-py/public/` + `src/sl-py/app/routers/admin.py` |
 
 ### 2.3 外部依赖接口
 
 | 外部服务 | 端点 | 鉴权 | 调用范式 | 代码引用 |
 |---------|------|------|---------|---------|
-| strata-match | `POST /api/v1/query` | 无（内网） | HTTP JSON request/response | `src/app/services/strata_match_client.py` |
-| strata-match | `POST /api/v1/users` | 无 | HTTP JSON（联动注册） | `src/app/routers/admin.py` |
-| strata-match | `POST /api/v1/jobs` | 无 | HTTP JSON（open/close） | `src/app/services/job_store.py` |
-| 下游 LLM | `POST /v1/chat/completions` | API Key | OpenAI 兼容 HTTP | `src/app/services/downstream_llm.py` |
-| text-cli | `POST /text-cli/cli`（经运行时表路由） | 内网 | HTTP JSON | `src/app/services/textcli_enhanced_client.py`（v0.1.2_a） |
+| strata-match | `POST /api/v1/query` | 无（内网） | HTTP JSON request/response | `src/sl-py/app/services/strata_match_client.py` |
+| strata-match | `POST /api/v1/users` | 无 | HTTP JSON（联动注册） | `src/sl-py/app/routers/admin.py` |
+| strata-match | `POST /api/v1/jobs` | 无 | HTTP JSON（open/close） | `src/sl-py/app/services/job_store.py` |
+| 下游 LLM | `POST /v1/chat/completions` | API Key | OpenAI 兼容 HTTP | `src/sl-py/app/services/downstream_llm.py` |
+| text-cli | `POST /text-cli/cli`（经运行时表路由） | 内网 | HTTP JSON | `src/sl-py/app/services/textcli_enhanced_client.py` |
 
 
 ---
 
 ## 三、主线服务设计
 
-### 3.1 路由层（`src/app/routers/`）
+### 3.1 路由层（`src/sl-py/app/routers/`）
 
 | 能力 | 实现 | 说明 |
 |------|------|------|
-| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions`（_b 主路径归并 sl_llm_provider + 过 ck 闸） |
+| OpenAI 入口 | `chat.py` — `chat_completions()` + dispatch 决策链 | `/v1/chat/completions` |
 | Anthropic 入口 | `anthropic_chat.py` — 请求翻译 + dispatch | `/v1/messages` |
 | 数据面包 | `packets.py` — 上下文数据包提交 + 校验 | `/v1/packets`|
 | 数据面包-永久区通道 | `longdata.py` — doc/memory 引入/删除/列出 | `/v1/longdata` |
 | 健康检查 | `health.py` | `/health` |
 | 异步任务 API | `tasks.py` — GET + POST cancel | `/api/v1/tasks/{id}` |
-| 运行时表管理 API | `runtime_endpoints.py` — CRUD（v0.1.2_a） | `/api/v1/runtime-endpoints`（admin scope） |
-| 制品数据面 | `artifacts.py` — 相位产物查询（v0.1.2_a） | `/api/v1/artifacts/{id}`、`?pipeline_id=` |
-| 管道管理 API | `pipeline.py` — 9 端点（v0.1.2，`pipelines_api.enabled` 默认 false） | `/api/v1/pipelines` |
+| 运行时表管理 API | `runtime_endpoints.py` — CRUD | `/api/v1/runtime-endpoints`（admin scope） |
+| 制品数据面 | `artifacts.py` — 相位产物查询 | `/api/v1/artifacts/{id}`、`?pipeline_id=` |
 | 统一闸钩子面 | `gate.py` — gate_manager 配置（_b 新增） | `/gate-manager/config` GET/PATCH |
 | 管理面板 | `admin.py` — HTML 页面路由 | `/admin/sessions` 等 |
 
-### 3.2 编排服务层（`src/app/services/`）
+### 3.2 编排服务层（`src/sl-py/app/services/`）
 
 | 能力 | 实现 | 说明 |
 |------|------|------|
 | 复杂度分类 | `complexity_classifier.py` | 规则匹配 → chat / task_chain / fractal |
 | 执行路由 | `execution_router.py` | 分形决策 + 模型选择 + 下游调用编排 |
-| 任务链执行器 | `task_chain_executor.py` | plan → execute → verify → summarize |
-| 内部推理器 | `internal_reasoner.py` | 步骤拆解 + 验证逻辑 |
+| 任务链服务 | `task_chain_service.py` | 单步闭环：写 tasks 表(queued)→委托 text-cli --async →轮询→确认闸(内部 `_dispatch_confirm`)→回写(completed/error)，承接 G3 落库责任 |
 | 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
 | 上下文压缩 | `context_compressor.py` | 上游过滤——按复杂度三态处理 system 消息 |
 | 上下文标签管理 | `context_manager.py` | 按标签 load/unload/list/refresh 管理永久区上下文 |
@@ -107,30 +105,30 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | strata-match 客户端 | `strata_match_client.py` | HTTP 客户端 + 缓存 + mock |
 | 工具适配器 | `strata_match_tool_adapter.py` | strata-match 工具 → OpenAI 格式 |
 | 工具分发器 | `tool_dispatcher.py` | 注册 + 路由工具调用 |
-| 动态工具执行 | `dynamic_tool_executor.py` | 运行时工具执行（v0.1.2_a：走强化客户端，无 `command.replace`） |
+| 动态工具执行 | `dynamic_tool_executor.py` | 运行时工具执行（走强化客户端，无 `command.replace`） |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
 | 模型选择器 | `model_selector.py` | 直接透传 service 给 execution_router（_b：llm_routing 配置唯一真源，无 service_map 白名单截断） |
-| 唯一推理落点 | `sl_llm_provider.py` | _b 新增——所有路径（主/相位/工具）收敛；通用 service 选择 + ck 闸集成 + context_id 生成 |
-| 推理缝 | `inference_seam.py` | _b 新增——`SlInferenceSeam`：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸监听 |
-| 统一闸 | `gate_manager.py` | _b 新增——跨内核闸编排：GateType 五类 + 组合函数注册表 + 跨内核循环 + ck/pk 端口适配 |
-| 内核适配层 | `kernel_adapters.py` | _b 新增——sl 侧 ck 组件（SlContextKernel/适配器）+ pk 装配（build_phase_engine） |
+| 唯一推理落点 | `sl_llm_provider.py` | 所有路径（主/相位/工具）收敛；通用 service 选择 + ck 闸集成 + context_id 生成 |
+| 推理缝 | `inference_seam.py` | `SlInferenceSeam`：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸监听 |
+| 统一闸 | `gate_manager.py` |  跨内核闸编排：GateType 五类 + 组合函数注册表 + 跨内核循环 + ck/pk 端口适配 |
+| 内核适配层 | `kernel_adapters.py` | sl 侧 ck 组件（SlContextKernel/适配器）+ pk 装配（build_phase_engine） |
 | 逻辑抽象器 | `logic_abstractor.py` | 关键词判定 subtype |
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
 | Job 存储 | `job_store.py` | 跨组件 Job 协同 |
-| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（v0.1.1 新增；_c 类型准入改配置驱动 `packets.types`，空配置回落内置默认） |
-| 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要（v0.1.1 新增） |
-| 永久区数据面 | `longdata.py` | 通道B（永久区）：doc/memory 引入/删除/列出，落 longdata 表 + 永久区（_c 新增） |
-| 相位产物桥接 | `sl_artifact_store.py` | 链路 C：实现 pk `ArtifactStore` 端口，落 sl SQLite（_c 新增，替换 pk 内存 `InMemoryArtifactStore`） |
-| 运行时表 | `runtime_endpoints.py` | tc 端点配置面（v0.1.2_a）：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
-| 强化客户端 | `textcli_enhanced_client.py` | tc 执行面（v0.1.2_a）：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
-| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约（_b 整体替换）：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配），sl 自持状态机退役 |
-| 相位内核 | `kernels/phase_kernel/` | _b vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填） |
-| 上下文内核 | `kernels/context_kernel/` | _b vendored——ck 组件：六层拼装 + 推理闸 + gate_mode（纯副本，sl 适配层封装） |
-| 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配；_c 放宽：artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict） |
-| token 服务 | `token_service.py` | 统一 token（v0.1.2_a）：issue_token/verify_token/map_user_id |
+| Packet 存储 | `packet_store.py` | 内存缓存 + TTL 自动清理 + type 校验（ 类型准入改配置驱动 `packets.types`，空配置回落内置默认） |
+| 预处理器 | `preprocessors.py` | 按 type 分发预处理器提取摘要 |
+| 永久区数据面 | `longdata.py` | 通道B（永久区）：doc/memory 引入/删除/列出，落 longdata 表 + 永久区 |
+| 相位产物桥接 | `sl_artifact_store.py` | 链路 C：实现 pk `ArtifactStore` 端口，落 sl SQLite|
+| 运行时表 | `runtime_endpoints.py` | tc 端点配置面：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
+| 强化客户端 | `textcli_enhanced_client.py` | tc 执行面：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
+| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配），sl 自持状态机退役 |
+| 相位内核 | `kernels/phase_kernel/` | vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填） |
+| 上下文内核 | `kernels/context_kernel/` | vendored——ck 组件：六层拼装 + 推理闸 + gate_mode（纯副本，sl 适配层封装） |
+| 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配；artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict） |
+| token 服务 | `token_service.py` | 统一 token：issue_token/verify_token/map_user_id |
 
-### 3.3 工具层（`src/app/tools/`）
+### 3.3 工具层（`src/sl-py/app/tools/`）
 
 | 能力 | 实现 | 说明 |
 |------|------|------|
@@ -141,7 +139,6 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | text-cli 调用 | `call_textcli.py` | 执行指令（v0.1.2_a：走强化客户端 call） |
 | 上下文标签管理 | `context_manager.py` | 按标签管理永久区上下文 |
 
-> v0.1.2_a：`call_textcli`/`discover_textcli` 已从 `textcli_client` 切到强化客户端（信封直读、alias 路由）。
 
 ---
 
@@ -153,21 +150,21 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 客户端 → POST /v1/chat/completions
   │
   ├── [可选的] auth 中间件 → x-synthloop-user-id 校验 → 401 或继续
-  │    代码: src/app/middleware/auth.py
+  │    代码: src/sl-py/app/middleware/auth.py
   │
   ├── [可选的] 会话复用 → session_manager.get_or_create()
-  │    代码: src/app/services/session_manager.py
+  │    代码: src/sl-py/app/services/session_manager.py
   │
   ├── 消息前置检查层
   │     ├── Task-(.+)-synthloop 匹配 → 查 tasks 表 → 终点响应
   │     ├── <user-memory>...</user-memory> 匹配 → 提取 → 写入永久区
   │     └── 相位路由：带 synth_pipeline 字段 → 解析 action → pk 相位推理（薄壳委托）
-  │    代码: src/app/routers/chat.py chat_completions()
+  │    代码: src/sl-py/app/routers/chat.py chat_completions()
   │
   ├── 复杂度分类
   │     ├── 层1: 规则匹配（<1ms, 0 token）
   │     └── 层2: 分形 Prompt（1 次 LLM 调用）
-  │    代码: src/app/services/complexity_classifier.py
+  │    代码: src/sl-py/app/services/complexity_classifier.py
   │
   ├── 相位前置拦截：命中相位 XML 标签 → 直接路由到 pk 相位推理（不走分形）
   │     ├── <tc-phase>目标</tc-phase>           → 结构分形（structural，复杂）
@@ -179,15 +176,15 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
   │     ├── b/prompt_chat → strata-match 策略查询 → 注入
   │     ├── c/task → strata-match 工具注入 → LLM 工具调用循环
   │     └── e,f/task_chain → 任务链拆解执行
-  │    代码: src/app/routers/chat.py chat_completions() dispatch 决策链
+  │    代码: src/sl-py/app/routers/chat.py chat_completions() dispatch 决策链
   │
   ├── 主路径归并：所有分支经 build_messages 收束 → sl_llm_provider（唯一推理落点）
   │     ├── 上下文经 ck 拼装 + 闸监听（gate_mode=auto 时 park 返回 pending，可 peek/amend）
   │     └── 模型经 llm_routing 多场景配置（service 透传，无白名单截断）
-  │    代码: src/app/services/sl_llm_provider.py + kernels/context_kernel/
+  │    代码: src/sl-py/app/services/sl_llm_provider.py + kernels/context_kernel/
   │
   └── SSE 流式响应
-       代码: src/app/services/streaming_handler.py
+       代码: src/sl-py/app/services/streaming_handler.py
 ```
 
 ### 4.1.1 错误与降级路径
@@ -205,7 +202,7 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 ```
 config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
   │                                  │
-  │  src/app/config.py               ├── get_config() → 全局缓存
+  │  src/sl-py/app/config.py               ├── get_config() → 全局缓存
   │                                  ├── get_section("strata_match")
   │                                  ├── get_auth_settings()
   │                                  ├── get_session_memory_settings()
@@ -231,7 +228,7 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
   │            <references>...</references>
   │            <session>...</session>
   │          </context>
-  └── 推理: downstream_llm.chat() / task_chain_executor.execute()
+  └── 推理: downstream_llm.chat() / TaskChainService.run()（v0.1.2_d：旧 TaskChainExecutor 删除，改由 TaskChainService 单步闭环驱动）
 ```
 
 ### 4.4 数据面双通道
@@ -272,12 +269,11 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 |------|------|------|------|------|
 | `/v1/chat/completions` | OpenAI | POST | 无（可选 Bearer） | `chat.py` |
 | `/v1/messages` | Anthropic | POST | 无（可选 x-api-key） | `anthropic_chat.py` |
-| `/v1/packets` | JSON | POST | 无 | `packets.py`（v0.1.1） |
-| `/v1/longdata` | JSON | POST/DELETE/GET | 无 | `longdata.py`（v0.1.2_c） |
-| `/api/v1/runtime-endpoints` | JSON | GET/POST/PATCH/DELETE | admin scope（v0.1.2_a） | `runtime_endpoints.py` |
-| `/api/v1/artifacts/{id}` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
-| `/api/v1/artifacts?pipeline_id=` | JSON | GET | 无 | `artifacts.py`（v0.1.2_a） |
-| `/api/v1/pipelines` | JSON | 9 端点 | `pipelines_api.enabled`（默认 false → 404） | `pipeline.py`（v0.1.2） |
+| `/v1/packets` | JSON | POST | 无 | `packets.py` |
+| `/v1/longdata` | JSON | POST/DELETE/GET | 无 | `longdata.py` |
+| `/api/v1/runtime-endpoints` | JSON | GET/POST/PATCH/DELETE | admin scope | `runtime_endpoints.py` |
+| `/api/v1/artifacts/{id}` | JSON | GET | 无 | `artifacts.py` |
+| `/api/v1/artifacts?pipeline_id=` | JSON | GET | 无 | `artifacts.py` |
 | `/health` | JSON | GET | 无 | `health.py` |
 | `/admin/sessions` | HTML | GET | 无 | `admin.py` |
 | `/admin/tasks` | HTML | GET | 无 | `admin.py` |
@@ -296,47 +292,27 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 | synth-loop → 下游 LLM | `POST /v1/chat/completions` | HTTP | 配置化 |
 | synth-loop → text-cli | `POST /text-cli/cli` | HTTP | 配置化 |
 
-> 完整契约定义见版本归档中的 `functional_design/contract_zh.md`
 
 ---
 
-## 六、媒介层设计
-
-### 6.1 媒介-系统平面调用矩阵
-
-| 媒介 | 编排面 | 策略面 | 执行面 | 管理面 |
-|------|:------:|:------:|:------:|:------:|
-| OpenAI SDK 客户端 | ✅ | — | — | — |
-| Anthropic SDK 客户端 | ✅ | — | — | — |
-| cURL / HTTP | ✅ | — | — | — |
-| 管理面板浏览器 | — | — | — | ✅ |
-
-### 6.2 媒介规格
-
-| 媒介 | 入口路径 | 赋能能力 | 战略角色 |
-|------|---------|---------|---------|
-| OpenAI 客户端 | `base_url=http://localhost:13155/v1` | 分形决策 + 策略注入 + 流式 | 主入口 |
-| Anthropic 客户端 | `base_url=http://localhost:13155` | 分形决策 + 策略注入 + 流式翻译 | 兼容入口 |
-| 管理面板 | `http://localhost:13155/admin/*` | 会话/任务链/Job 可视化管理 | 运维 |
-
 ---
 
-## 七、配置与持久化设计
+## 六、配置与持久化设计
 
-### 7.1 配置文件拓扑
+### 6.1 配置文件拓扑
 
 ```
-src/
+src/sl-py/
 ├── config.yaml            ← 主配置（服务、auth、session_memory、async_tasks）
 ├── model_config.yaml      ← 模型端点池 + LLM 路由
 └── complexity_rules.yaml  ← 分形规则（仅覆盖两端极值）
 
-src/
+src/sl-py/
 └── data/
     └── gateway.db         ← SQLite 持久化（aiosqlite）
 ```
 
-### 7.2 配置表
+### 6.2 配置表
 
 | 配置段 | 文件 | 默认值 | 代码消费方 |
 |--------|------|--------|-----------|
@@ -352,15 +328,16 @@ src/
 | `llm_routing` | `model_config.yaml` | 路由映射（_b：多场景唯一真源，任意 service 透传无白名单截断） | `execution_router.py` → `model_selector.py` → `sl_llm_provider.py` |
 | `llm_gateway` | `model_config.yaml` | enabled=false, gateways（多网关注册表，默认未启用） | `downstream_llm.py` |
 | `rules` | `complexity_rules.yaml` | chat/task_chain 规则 | `complexity_classifier.py` |
+| `logic_categories` | `config.yaml`（来源于外置 `logic_categories.yaml`，真源为 `complexity_rules.yaml` 的 subtypes） | B3 逻辑分类外置：细分路由命中 → 直查细分路由；枚举校验（key 须为 subtypes 真源子集） | `execution_router.py` / `model_selector.py`（v0.1.2_d） |
 
-### 7.3 持久化
+### 6.3 持久化
 
 | 表 | 文件 | 用途 | 记录数上限 |
 |----|------|------|:---------:|
 | `session_snapshots` | `gateway.db` | 会话持久化（permanent_system_prompt, temp_history, snapshot） | 无 |
 | `events` | `events.jsonl` | 事件日志 | 无 |
 | `users` | `gateway.db` | 用户认证（v0.1.1） | 无 |
-| `tasks` | `gateway.db` | 异步任务（v0.1.1） | 无 |
+| `tasks` | `gateway.db` | 异步任务（v0.1.1）；**v0.1.2_d 重写**：旧 `TaskChainExecutor` 删除，落库责任改由 `TaskChainService.run()` 承接（queued→running→completed/error 状态机，经 `get_shared_db()` 统一连接串行写），确认闸为内部私有 `_dispatch_confirm`（非硬依赖） | 无 |
 | `runtime_endpoints` | `gateway.db` | tc 端点配置面（v0.1.2_a）：alias 多物理行 + rank 降级 + token 加密 | 无 |
 | `artifacts` | `gateway.db` | 相位产物（v0.1.2_a；_c 放宽）：artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict，TTL 24h | 无 |
 | `longdata` | `gateway.db` | 永久区通道（v0.1.2_c）：doc/memory 引入（id/session_id/type/content/created_at），无 TTL | 无 |
@@ -368,33 +345,31 @@ src/
 
 ---
 
-## 八、安全设计
+## 安全设计
 
-### 8.0 威胁假设
+### 威胁假设
 
 | 假设 | 影响 | 当前措施 |
 |------|------|---------|
-| 部署在内网，外部不可直达 | 低——内网隔离 | 无额外认证（出厂默认） |
-| 恶意客户端伪造 user-id | 中——多租户场景 | `auth.enabled=true, required=true` 时强制校验（v0.1.2_a：+ token 双轨） |
+| 恶意客户端伪造 user-id | 中——多租户场景 | `auth.enabled=true, required=true` 时强制校验 |
 | 下游 LLM API Key 泄露 | 高——财务损失 | Key 配在 config.yaml 中，建议环境变量注入 |
-| tc 令牌外泄（v0.1.2_a） | 高 | 运行时表 token 加密（`SELF_TOKEN_ENC_KEY`）+ 管理 API 脱敏 + admin scope |
+| tc 令牌外泄 | 高 | 运行时表 token 加密（`SELF_TOKEN_ENC_KEY`）+ 管理 API 脱敏 + admin scope |
 
-**最坏情况推演**：config.yaml 泄露 → 攻击者可调用下游 LLM 产生费用。缓解：生产环境使用 `${ENV_VAR}` 环境变量注入（`_resolve_env_vars()` 内置支持，见 `src/app/config.py`）。
+**最坏情况推演**：config.yaml 泄露 → 攻击者可调用下游 LLM 产生费用。缓解：生产环境使用 `${ENV_VAR}` 环境变量注入（`_resolve_env_vars()` 内置支持，见 `src/sl-py/app/config.py`）。
 
-### 8.1 网络分层 / 终端安全 / 隐私合规
+### 网络分层 / 终端安全 / 隐私合规
 
 | 维度 | 措施 |
 |------|------|
 | 网络分层 | `auth.enabled` 配置控制，默认关闭（开箱即用） |
-| 敏感信息 | 代码中无硬编码密钥（D1-D5 纪律红线 D5 约束对外措辞） |
 | Session 隔离 | `x-synthloop-session-id` 隔离会话，`x-synthloop-user-id` 隔离用户 |
-| token 双轨（v0.1.2_a） | `x-synthloop-token`（user/service/admin scope）验权 → `x-synthloop-user-id` 归身份；运行时表管理 API 要求 admin scope |
+| token 双轨 | `x-synthloop-token`（user/service/admin scope）验权 → `x-synthloop-user-id` 归身份；运行时表管理 API 要求 admin scope |
 
 ---
 
-## 九、非功能性设计
+## 非功能性设计
 
-### 9.1 可观测性
+### 可观测性
 
 | 能力 | 实现 | 详情 |
 |------|------|------|
@@ -403,7 +378,7 @@ src/
 | 事件日志 | `events.jsonl` | 持久化，供 `/admin/analysis` 离线分析 |
 | 日志 | Python logging | 全局 logger + 模块级实例 |
 
-### 9.2 降级策略
+### 降级策略
 
 | 级别 | 条件 | 行为 | 代码 |
 |:----:|------|------|------|
@@ -411,7 +386,7 @@ src/
 | L2 | strata-match 不可用 | 默认 Prompt + 内置元工具 | `degradation_manager.py` |
 | L3 | 下游 LLM 不可用 | 返回 502 | `downstream_llm.py` |
 
-### 9.3 可靠性
+### 可靠性
 
 | 机制 | 说明 |
 |------|------|
@@ -422,76 +397,8 @@ src/
 
 ---
 
-## 十、乘数效应结构
 
-| 基础设施 | 乘数产品 |
-|---------|---------|
-| 分形决策（`complexity_classifier.py`） | 按请求复杂度选择最经济的执行路径，简单请求零策略开销 |
-| 策略注入（`strata_match_client.py`） | 无需手写 Prompt，自动匹配专家人设 |
-| 任务链推进（`task_chain_executor.py`） | 复杂任务自动拆解，无需手动分步调用 |
-| SSE 双协议（`streaming_handler.py`、`protocol_translator.py`） | 兼容两大生态，零成本接入 |
-| 可观测性（`admin.py` + `public/`） | 全链路可视化，降低调试成本 |
-
----
-
-## 十一、版本契约
-
-| 版本 | 验收标准 | 里程碑定位 |
-|------|---------|-----------|
-| v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | 基线版本——功能完整度 |
-| v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | 基础设施版本——用户系统 + 分形深化 |
-| v0.1.2 | 管道引擎（PipelineSession + 状态机 + 计划编译器 + 异步委托 + 9 端点 API） | 质变版本——相位管道 |
-| v0.1.2_a | tc 消费链路收敛（运行时表 + 强化客户端 + textcli_client 废弃）+ LLM 层（6 场景 + 降级）+ 相位 chat 契约（synth_pipeline 多轮）+ 统一 token；72 测试全绿 | 纠偏版本（不升版本号） |
-| v0.1.2_b | vendored 集成 ck/pk + 三前置（问题分形链式/模型三档/统一闸 gate_manager）+ 整体替换（pk 相位引擎）+ 推理收束（sl_llm_provider 唯一落点）+ 主路径过闸 + model_selector 多场景透传；104 测试全绿 | 代码集成补强（不升版本号）——相位,上下文关联重新集成 |
-| v0.1.2_c | 数据面内聚：双通道（临时区 packets 类型准入进配置 `packets.types` + 永久区 `/v1/longdata`）+ 链路 C 桥接（`SlArtifactStore` 落 SQLite，pk 产物可对外取）+ artifacts 表放宽（phase_index_txt/str-dict content）+ SlDataPlane 收尾；138 测试全绿 | 代码集成补强（不升版本号）——数据面内聚 |
-
-
----
-
-## 十二、已知偏差与技术债
-
-### 偏差表
-
-| 偏差 | 影响 | 原因 |
-|------|------|------|
-| `_check_cancelled()` 使用 aiosqlite 同步查询 | 高频场景有性能隐患 | 骨架阶段简化实现 |
-| `FRACTAL_SYSTEM_PROMPT` 硬编码在 `chat.py` | prompt 改动需改代码 | 未配置化 |
-| DB 访问模式不一致（本地 import vs 全局） | 可维护性问题 | 历史遗留 |
-| 相位执行为"简化执行"（v0.1.2_a） | 已解决（_b 整体替换）：执行经推理缝 LLM（pk SlInferenceSeam），非 tc | — |
-| 相位 LLM 决策路径未被测试（v0.1.2_a） | 已解决（_b）：相位测试注入 mock 推理缝，规划/执行路径被验证 | — |
-| `task_chain` 分支未归并 sl_llm_provider（_b） | task_chain_executor 内部仍直接调 downstream_llm，未收敛唯一推理落点 | 内部实现较复杂，留后续完整归并 |
-| `logic_category` 未接入模型选择（_b） | 细分类型维度未用于模型选择 | 预留签名，未来精细化维度 |
-
-
-
----
-
-## 十三、测试架构
-
-### 测试分层
-
-| 层 | 位置 | 运行条件 | 覆盖内容 |
-|----|------|---------|---------|
-| 静态测试 | 离线 pytest | 逻辑正确性（正则、状态机、配置、分支） |
-| 动态测试 | 需服务运行中 | 端到端行为（Header 读写、SSE、页面） |
-
-### 冒烟测试定义
-
-服务启动后，执行以下 curl 确认基本可用：
-
-```bash
-curl http://localhost:13155/health
-# → {"status": "ok", "version": "0.1.0"}
-
-curl -s http://localhost:13155/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
-# → 返回含 choices 的 JSON
-```
-
----
-
-## 十四、设计原则
+## 设计原则
 
 | 原则 | 含义 | 体现 |
 |------|------|------|

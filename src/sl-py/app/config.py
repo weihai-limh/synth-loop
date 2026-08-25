@@ -11,9 +11,14 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 # ── 项目路径常量 ──────────────────────────────────────────
-# src/app/config.py → .parent=src/app/ → .parent.parent=src/ → .parent.parent.parent=项目根
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
+# 本文件实际位于 src/sl-py/app/config.py
+#   .parent          = src/sl-py/app
+#   .parent.parent   = src/sl-py
+#   .parent×3        = src
+#   .parent×4        = 项目根 (synth-loop)
+# config.yaml / complexity_rules.yaml / model_config.yaml 均位于 sl-py 根目录
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+SRC_DIR = PROJECT_ROOT / "src" / "sl-py"
 DATA_DIR = SRC_DIR / "data"
 DEPLOY_DIR = PROJECT_ROOT / "deploy"
 CONFIG_DIR = SRC_DIR / "config"

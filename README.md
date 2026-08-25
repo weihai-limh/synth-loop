@@ -82,4 +82,4 @@ Requests are intercepted before fractal routing: phase XML tags (`<tc-phase>` st
 
 ## License / 许可证
 
-`src/app/` & `src/public/`: Apache 2.0
+`src/sl-py/app/` & `src/sl-py/public/`: Apache 2.0
