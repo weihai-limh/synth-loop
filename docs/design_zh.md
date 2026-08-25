@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v0.1.2_d | **日期**：2026-08-25
+> **版本**：v0.1.2_e | **日期**：2026-08-26
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -111,7 +111,7 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | 唯一推理落点 | `sl_llm_provider.py` | 所有路径（主/相位/工具）收敛；通用 service 选择 + ck 闸集成 + context_id 生成 |
 | 推理缝 | `inference_seam.py` | `SlInferenceSeam`：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸监听 |
 | 统一闸 | `gate_manager.py` |  跨内核闸编排：GateType 五类 + 组合函数注册表 + 跨内核循环 + ck/pk 端口适配 |
-| 内核适配层 | `kernel_adapters.py` | sl 侧 ck 组件（SlContextKernel/适配器）+ pk 装配（build_phase_engine） |
+| 内核适配层 | `kernel_adapters.py` | sl 侧 ck 组件（SlContextKernel/适配器）+ pk 装配（build_phase_engine）+ `_PkGateAdapter`（_e 接通真实 `PhaseGateExecutor`：async 桥接 + query 受控相位面自实现） |
 | 逻辑抽象器 | `logic_abstractor.py` | 关键词判定 subtype |
 | 会话管理器 | `session_manager.py` | Session CRUD + 过期清理 |
 | DB 写入器 | `db_writer.py` | 异步事件日志写入 |
@@ -122,8 +122,8 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | 相位产物桥接 | `sl_artifact_store.py` | 链路 C：实现 pk `ArtifactStore` 端口，落 sl SQLite|
 | 运行时表 | `runtime_endpoints.py` | tc 端点配置面：种子幂等 + CRUD + token 加密/脱敏 + alias 路由/降级 |
 | 强化客户端 | `textcli_enhanced_client.py` | tc 执行面：四函数 + SPEC 1.3.2 信封直读 + rank 降级 + 鉴权不降级 |
-| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配），sl 自持状态机退役 |
-| 相位内核 | `kernels/phase_kernel/` | vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填） |
+| 相位编排器 | `phase_chat_orchestrator.py` | 相位 chat 契约：薄壳委托 pk `PhaseReasoningEngine`（build_phase_engine 装配；_e 接 sm：planner=PhasePlanPlanner，从 config.strata_match.url 取地址；`handle(..., lang="zh")` 单语硬编码），sl 自持状态机退役 |
+| 相位内核 | `kernels/phase_kernel/` | vendored——pk 组件：分形相位树 + 三闸 + 检查点 + 推理缝（SlInferenceSeam 填）+ sm 缝（SmStrategyBundle 结构化策略；_e copy 到 sl）+ i18n（`i18n/*.json` + `core/i18n.py` 加载器，sl 单语默认 zh；不含 serve/） |
 | 上下文内核 | `kernels/context_kernel/` | vendored——ck 组件：六层拼装 + 推理闸 + gate_mode（纯副本，sl 适配层封装） |
 | 制品数据面 | `artifact_dataplane.py` | 相位产物落库：artifacts 表 + TTL 24h（pk ArtifactStore 适配；artifact_id 唯一必填、其余可空、phase_index_txt 存 phase_path、content 支持 str/dict） |
 | token 服务 | `token_service.py` | 统一 token：issue_token/verify_token/map_user_id |

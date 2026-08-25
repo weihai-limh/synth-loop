@@ -29,9 +29,17 @@ class PhaseChatOrchestrator:
 
     def __init__(self, engine: Optional[Any] = None):
         from .kernel_adapters import build_phase_engine, SlContextSource
-        # 装配 pk 引擎（四缝 + SlInferenceSeam 推理缝）
+        # 装配 pk 引擎（四缝 + SlInferenceSeam 推理缝；_e Phase 3.2 接 sm）
         self._context_source = SlContextSource()
-        self._engine = engine or build_phase_engine(context_source=self._context_source)
+        # _e Phase 3.2：从 sl config.yaml 取 strata_match url 传入 build_phase_engine（接 sm）
+        strata_url = None
+        try:
+            from ..config import get_section
+            strata_url = get_section("strata_match").get("url")
+        except Exception:
+            strata_url = None  # 配置缺失 → 不接 sm（PhasePlanPlanner.no_strata=True 回落机械兜底）
+        self._engine = engine or build_phase_engine(
+            context_source=self._context_source, strata_base_url=strata_url)
 
     async def handle_chat(
         self,
@@ -47,18 +55,20 @@ class PhaseChatOrchestrator:
         - 回传驱动（带 synth_pipeline.id）→ 传 synth_pipeline 给 pk _handle_action
         - 新发起 → mode 由 chat.py 标签解析传入（structural/chain）→ 传 pk handle()
         - mode 为 None 且无 synth_pipeline → 未触发相位（抛 PhaseNotTriggeredError）
+
+        _e（i18n）：sl 单语，`lang="zh"` 硬编码（显式，防未来 pk 默认变动）；不改 handle 公开 API。
         """
         if synth_pipeline and synth_pipeline.get("id"):
             return await self._engine.handle(
                 user_text, synth_pipeline=synth_pipeline,
-                session_id=session_id, user_id=user_id,
+                session_id=session_id, user_id=user_id, lang="zh",
             )
 
         # 新发起：mode 由 chat.py 前置标签解析传入（<tc-phase>/<tc-phase-chain>）
         if mode is not None:
             return await self._engine.handle(
                 user_text, synth_pipeline=None,
-                session_id=session_id, user_id=user_id, mode=mode,
+                session_id=session_id, user_id=user_id, mode=mode, lang="zh",
             )
 
         # 无 mode 且无 synth_pipeline → 不进入相位（普通请求走原路径）

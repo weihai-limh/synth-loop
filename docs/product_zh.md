@@ -1,7 +1,7 @@
 # synth-loop 产品文档
 
 > **文档类型**：产品设计
-> **版本**：v0.1.2_d | **日期**：2026-08-25
+> **版本**：v0.1.2_e | **日期**：2026-08-26
 > **适用范围**：synth-loop
 > **关联文档**：`design_zh.md`、`api_zh.md`
 >
@@ -28,14 +28,14 @@
 | 唯一推理落点 | `sl_llm_provider.py` | 所有路径推理收敛；通用 service 选择 + ck 闸集成 |
 | 执行路由 | `execution_router.py` | 分形决策 + 模型选择（多场景透传，llm_routing 配置唯一真源） |
 | 上下文内核 | `kernels/context_kernel/`（ vendored） | 六层拼装 + 推理闸 + gate_mode |
-| 相位内核 | `kernels/phase_kernel/`（ vendored） | 分形相位树 + 三闸 + 检查点 + 推理缝 |
+| 相位内核 | `kernels/phase_kernel/`（ vendored） | 分形相位树 + 三闸 + 检查点 + 推理缝 + sm 缝（SmStrategyBundle 结构化策略）+ i18n（`i18n/*.json`，sl 单语默认 zh） |
 | 推理缝 | `inference_seam.py` | SlInferenceSeam：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸 |
 | 统一闸 | `gate_manager.py` | 跨内核闸编排：GateType 五类 + 组合函数 + 跨内核循环 |
 | 任务链服务 | `task_chain_service.py`（v0.1.2_d 新增，取代已删 `task_chain_executor.py` #6 红线） | 单步闭环：写 tasks 表(queued)→委托 text-cli --async→轮询→确认闸(内部 `_dispatch_confirm`)→回写(completed/error)，承接 G3 落库责任 |
 | 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
 | 协议翻译 | `protocol_translator.py` | Anthropic ↔ OpenAI 格式互转 |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
-| 相位编排器 | `phase_chat_orchestrator.py` | chat 多轮契约 |
+| 相位编排器 | `phase_chat_orchestrator.py` | chat 多轮契约（_e：planner 接 sm=PhasePlanPlanner，从 config.strata_match.url 取地址；`handle(..., lang="zh")` 单语硬编码） |
 
 ---
 

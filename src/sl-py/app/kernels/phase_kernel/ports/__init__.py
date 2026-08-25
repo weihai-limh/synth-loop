@@ -11,7 +11,7 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 from ..core.models import (
     PhaseDef, PhasePlan, PhaseResult, PipelineSession, ContextPatch, InferenceResult,
-    SmRequest, SmResponse,
+    SmRequest, SmResponse, SmStrategyBundle,
 )
 
 
@@ -37,9 +37,12 @@ class SmSeam(Protocol):
     prompt（策略内容），**只读经缝获取，pk 消费不获取**——pk 拿 prompt 喂给推理缝
     planning routing（ext） / 规划，不自己持有 sm 会话。`StrataMatcher` 是默认填缝实现。
     定位改接 `phase_path`（树路径）替换旧 `phase_meta` 手工拼 name/description。
+
+    Phase A（sm _b 升级）：返回类型从 `Optional[str]` 升级为 `Optional[SmStrategyBundle]`——
+    带回结构化 `tools[]`/`skills[]`/`assets[]`（compact 单值，已按 lang 过滤），pk 直接消费。
     """
 
-    async def query(self, req: SmRequest) -> Optional[str]: ...
+    async def query(self, req: SmRequest) -> Optional[SmStrategyBundle]: ...
 
 
 @runtime_checkable

@@ -20,6 +20,7 @@ from .gates import PhaseGateExecutor, MechanicalGate
 from .actions import PhaseAction
 from . import fractal
 from .decide_kind import decide_kind, tools_to_contract, DEFAULT_MAX_PHASE_DEPTH
+from .i18n import t
 from ..ports import Executor, Planner, Store, Gate, ToolCatalog, ArtifactStore, InferenceSeam
 
 
@@ -62,6 +63,8 @@ class PhaseReasoningEngine:
         # summary_ref 全开传递）；开 = 仅当该相位有下游消费者才触发（省低 b 调用）。
         self.summary_on_demand = summary_on_demand
         self._sessions: dict[str, PipelineSession] = {}
+        # i18n：当前请求语言（每请求由 handle(lang=) 重设；默认 zh）
+        self._lang = "zh"
 
     # ═══════════════════════════════════════════════════════
     # 主入口
@@ -69,7 +72,7 @@ class PhaseReasoningEngine:
 
     async def handle(self, user_text: str, synth_pipeline: Optional[dict] = None,
                      session_id: Optional[str] = None, user_id: Optional[str] = None,
-                     mode: Optional[str] = None) -> dict:
+                     mode: Optional[str] = None, lang: str = "zh") -> dict:
         """处理一次相位调用。
 
         - 带 synth_pipeline（含 id + action）→ 回传驱动，解析 action 推进状态机
@@ -77,7 +80,11 @@ class PhaseReasoningEngine:
 
         `mode`（P1）：`structural`（默认，正常分形下钻）或 `chain`（链式模式——根相位
         正常分形出多相位，但多相位直接出 path、下钻深度强制为 0，无 NODE 下钻）。
+
+        `lang`（i18n）：请求语言（`zh`/`en`），默认 `zh`。每请求重设 `self._lang`，
+        驱动 content/reason 本地化（t(key, lang=self._lang)）。可选参数，不改公开 API 签名。
         """
+        self._lang = lang or "zh"
         if synth_pipeline and synth_pipeline.get("id"):
             return await self._handle_action(synth_pipeline, user_text, session_id, user_id)
         return await self._start_planning(user_text, session_id, user_id, mode=mode)
@@ -129,8 +136,8 @@ class PhaseReasoningEngine:
         await self._store_artifact(session, plan_ref, plan_summary, "text")
 
         return {
-            "content": f"相位规划如下（共 {len(session.phases)} 个相位）：\n{plan_summary}\n\n"
-                       f"请确认（回传 action=confirm）或提出修改意见（action=reject/regenerate）。",
+            "content": t("plan_confirm", lang=self._lang, total=len(session.phases),
+                         summary=plan_summary),
             "synth_pipeline": self._sp(session, STEP_AWAITING_PLAN, 0, plan_ref),
         }
 
@@ -175,14 +182,14 @@ class PhaseReasoningEngine:
         session = await self._load(pipeline_id, session_id)
         if session is None:
             return {
-                "content": "管道不存在或已过期，请重新发起相位请求。",
+                "content": t("pipeline_missing", lang=self._lang),
                 "synth_pipeline": self._sp_terminal(pipeline_id, STEP_ABORTED),
             }
 
         if action == PhaseAction.ABORT.value:
             session.abort()
             await self._persist(session)
-            return self._respond(session, STEP_ABORTED, "管道已中止。")
+            return self._respond(session, STEP_ABORTED, t("pipeline_aborted", lang=self._lang))
 
         if action == PhaseAction.REJECT.value:
             return await self._reject(session, user_text)
@@ -198,7 +205,7 @@ class PhaseReasoningEngine:
 
         # 未知 action → 不推进
         return {
-            "content": f"未知 action: {action}",
+            "content": t("unknown_action", lang=self._lang, action=action),
             "synth_pipeline": self._sp(session, self._step_of(session), 0, None),
         }
 
@@ -294,10 +301,13 @@ class PhaseReasoningEngine:
     def _contract_of(self, phase: PhaseDef) -> Optional[dict]:
         """从相位构造 decide_kind 的 contract（input/output schema + 可固化产物）。
 
-        Phase 2 阶段默认无 sm 工具契约 → 返回 None（decide_kind 据此判 NODE，驱动下钻）。
-        未来接入 sm `tools_to_contract`（P2b）时，此处可替换为工具契约。
+        Phase A（sm _b）：接通 `tools_to_contract`——若相位带 sm `tools[]`（由
+        `PhasePlanPlanner` 从 bundle 注入），用它构造判定契约（input_schema/output_schema/
+        requires），使 `decide_kind` 的 NODE/LEAF 判定不再无脑判 NODE 下钻。
+        相位无 tools 时回落 None（decide_kind 据此判 NODE，驱动下钻）。
         """
-        # 相位自身带 input/output schema 时可用；当前 PhaseDef 无 schema 字段 → None
+        if phase.tools:
+            return tools_to_contract(phase.tools)
         return None
 
     # ═══════════════════════════════════════════════════════
@@ -374,9 +384,9 @@ class PhaseReasoningEngine:
                 return await self._generate_next_path(session, nxt)
             session.complete()
             await self._persist(session)
-            return self._respond(session, STEP_COMPLETED, "所有相位已完成！")
+            return self._respond(session, STEP_COMPLETED, t("all_phases_completed", lang=self._lang))
 
-        return self._respond(session, STEP_AWAITING_PLAN, "当前状态无法 confirm。")
+        return self._respond(session, STEP_AWAITING_PLAN, t("state_cannot_confirm", lang=self._lang))
 
     async def _reject(self, session: PipelineSession, feedback: str) -> dict:
         current = self._next_leaf(session)
@@ -387,8 +397,8 @@ class PhaseReasoningEngine:
             current.status = PhaseStatus.AWAITING_PATH_CONFIRM
             await self._persist(session)
             return self._respond(session, STEP_AWAITING_PATH,
-                                 f"已驳回，反馈：{(feedback or 'no feedback')[:100]}。"
-                                 f"请确认重新执行（confirm）或中止（abort）。")
+                                 t("rejected_retry", lang=self._lang,
+                                   feedback=(feedback or "no feedback")[:100]))
         # 规划级驳回 → 重新规划
         return await self._regenerate(session, feedback)
 
@@ -413,8 +423,8 @@ class PhaseReasoningEngine:
             await self._persist(session)
             plan_summary = "；".join(f"{p.name}（{p.description[:30]}）" for p in session.phases)
             return {
-                "content": f"已重新规划（共 {len(session.phases)} 个相位）：\n{plan_summary}\n\n"
-                           f"请确认（action=confirm）或继续修改（action=reject/regenerate）。",
+                "content": t("replanned_confirm", lang=self._lang, total=len(session.phases),
+                             summary=plan_summary),
                 "synth_pipeline": self._sp(session, STEP_AWAITING_PLAN, 0,
                                            f"art_{session.pipeline_id}_plan"),
             }
@@ -438,8 +448,8 @@ class PhaseReasoningEngine:
         # 纠偏-001：path 产物真正写入数据面（ref 可 fetch 取回）
         await self._store_artifact(session, artifact_ref, path, "application/json")
         return {
-            "content": f"相位 {phase.index + 1}/{self._leaf_total(session)}「{phase.name}」的 path 如下：\n"
-                       f"{_truncate(path)}\n\n确认执行（confirm）/ 驳回修改（reject + 意见）/ 中止（abort）。",
+            "content": t("phase_path_prompt", lang=self._lang, i=phase.index + 1,
+                         total=self._leaf_total(session), name=phase.name, path=_truncate(path)),
             "synth_pipeline": self._sp(session, STEP_AWAITING_PATH, phase.index, artifact_ref),
         }
 
@@ -509,7 +519,8 @@ class PhaseReasoningEngine:
             logger.error(f"相位执行失败: {e}")
             session.phase_summaries.append(PhaseArtifact(phase.index, type="error", data=str(e)))
             await self._persist(session)
-            return self._respond(session, STEP_ABORTED, f"相位执行失败（后端不可达）：{e}")
+            return self._respond(session, STEP_ABORTED,
+                                 t("phase_exec_failed", lang=self._lang, error=e))
 
         if result.status == "pending":
             # 长任务：返回 task_id → check_result 决策点（设计稿 §五）
@@ -522,8 +533,8 @@ class PhaseReasoningEngine:
             await self._store_artifact(session, result_ref,
                                        {"task_id": result.task_id, "status": "pending"}, "application/json")
             return {
-                "content": f"相位「{phase.name}」已提交异步执行，task_id={result.task_id}。"
-                           f"查询结果请回传 action=check_result。",
+                "content": t("phase_submitted_async", lang=self._lang, name=phase.name,
+                             task_id=result.task_id),
                 "synth_pipeline": self._sp(session, STEP_EXECUTING, phase.index, result_ref),
             }
 
@@ -533,17 +544,17 @@ class PhaseReasoningEngine:
         """R4 长任务结果查询（check_result 决策点，设计稿 §五）"""
         current = self._next_leaf(session)
         if current is None:
-            return self._respond(session, self._step_of(session), "无活动相位可查询。")
+            return self._respond(session, self._step_of(session), t("no_active_phase", lang=self._lang))
         task = next((t for t in reversed(session.async_tasks)
                      if t.get("phase_index") == current.index), None)
         if task is None:
-            return self._respond(session, STEP_EXECUTING, "当前相位无待查询的异步任务。")
+            return self._respond(session, STEP_EXECUTING, t("no_pending_task", lang=self._lang))
         try:
             result = await self.executor.poll(task["task_id"])
         except Exception as e:
-            return self._respond(session, STEP_EXECUTING, f"轮询失败：{e}")
+            return self._respond(session, STEP_EXECUTING, t("poll_failed", lang=self._lang, error=e))
         if result.status == "pending":
-            return self._respond(session, STEP_EXECUTING, "任务仍在执行中，请稍后回传 check_result。")
+            return self._respond(session, STEP_EXECUTING, t("task_still_pending", lang=self._lang))
         return await self._finalize_execution(session, current, result)
 
     # ═══════════════════════════════════════════════════════
@@ -625,10 +636,10 @@ class PhaseReasoningEngine:
                 return await self._generate_next_path(session, nxt)
             session.complete()
             await self._persist(session)
-            return self._respond(session, STEP_COMPLETED, "所有相位已完成！")
+            return self._respond(session, STEP_COMPLETED, t("all_phases_completed", lang=self._lang))
         if status == PhaseStatus.AWAITING_APPROVAL:
             return self._respond(session, STEP_AWAITING_APPROVAL,
-                                 f"相位「{phase.name}」执行完成，等待人工审批（confirm/reject）。")
+                                 t("phase_done_await_approval", lang=self._lang, name=phase.name))
         # FAILED —— earliest-close 门控（Phase 3/7）：复用 _phase_rollback
         #   （首相位最浅终止 / 非首相位回退重试 / 回退超限 settled 放行）
         return await self._phase_rollback(session, phase,
@@ -653,28 +664,28 @@ class PhaseReasoningEngine:
                                         "count": phase.rollback_count, "reason": reason})
             await self._persist(session)
             return self._respond(session, STEP_AWAITING_PATH,
-                                 f"相位「{phase.name}」进入相位内回退重试"
-                                 f"（{phase.rollback_count}/{self.max_rollback_iters}）。"
-                                 f"请确认重试（confirm）或中止（abort）。")
+                                 t("phase_rollback_retry", lang=self._lang, name=phase.name,
+                                   count=phase.rollback_count, max=self.max_rollback_iters))
         # 回退超限 → 按位置分叉（骨架 §2.6：首相位最浅终止 / 非首相位 settled）
         if self._is_verification_phase(session, phase):
             session.abort()
             await self._persist(session)
             return self._respond(session, STEP_ABORTED,
-                                 f"首相位验证点「{phase.name}」回退超限，整树最浅终止。{reason}")
+                                 t("verification_phase_abort", lang=self._lang, name=phase.name,
+                                   reason=reason))
         # 非首相位超限 → 接受稳定产出放行（settled），并推进到下一 LEAF
         phase.status = PhaseStatus.COMPLETED
         await self._persist(session)
         nxt = self._next_leaf(session)
         if nxt is not None:
             resp = await self._generate_next_path(session, nxt)
-            resp["content"] = (f"相位「{phase.name}」回退超限，接受稳定产出放行（settled）。\n\n"
-                               + resp["content"])
+            resp["content"] = (t("phase_settled_next", lang=self._lang, name=phase.name,
+                                 content=resp["content"]))
             return resp
         session.complete()
         await self._persist(session)
         return self._respond(session, STEP_COMPLETED,
-                             f"相位「{phase.name}」回退超限，接受稳定产出放行（settled），所有相位完成。")
+                             t("phase_settled_all_done", lang=self._lang, name=phase.name))
 
     async def _quality_passed(self, phase: PhaseDef, result) -> bool:
         """质量闸是否通过（设计稿 §4.1 / §13.4②）

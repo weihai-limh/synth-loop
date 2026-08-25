@@ -19,7 +19,9 @@ import json
 import urllib.request
 from typing import Any, Optional
 
-from ..core.models import PhaseDef, PhasePlan, PhaseGates, SmRequest, SmResponse
+from ..core.models import (
+    PhaseDef, PhasePlan, PhaseGates, SmRequest, SmStrategyBundle,
+)
 from ..ports import SmSeam, Planner
 from .mechanical_planner import MechanicalPlanner
 
@@ -35,12 +37,14 @@ class StrataHttpSm:
         self.base_url = base_url
         self.no_strata = no_strata
 
-    async def query(self, req: SmRequest) -> Optional[str]:
+    async def query(self, req: SmRequest) -> Optional[SmStrategyBundle]:
         if self.no_strata or not self.base_url:
             return None
         phase_meta = {"name": req.name or req.intent[:80] or "整体规划",
                       "description": req.description or req.name or req.intent or "整体规划"}
-        body = json.dumps({"user_ask": req.intent, "phase": phase_meta}).encode("utf-8")
+        # Phase A（sm _b）：请求体加 lang，使语言在 sm 侧控制
+        body = json.dumps({"user_ask": req.intent, "phase": phase_meta,
+                           "lang": req.lang}).encode("utf-8")
         url = f"{self.base_url.rstrip('/')}/api/v1/query"
         try:
             def _post():
@@ -49,10 +53,25 @@ class StrataHttpSm:
                 with urllib.request.urlopen(r, timeout=5) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             data = await asyncio.to_thread(_post)
-            key = "prompt_cn" if req.lang == "zh" else "prompt"
-            return data.get(key) or data.get("primary_prompt")
+            return self._parse_bundle(data, req.lang)
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_bundle(data: dict, lang: str) -> SmStrategyBundle:
+        """解析 sm _b 响应为结构化 bundle（compact 单值，无需解析 *_lang 字典）。
+
+        - `primary_prompt`：按 lang 输出的主提示词（sm 侧已过滤）。
+        - `tools[]`/`skills[]`/`assets[]`：compact 单值（`name_lang`/`description_lang`/
+          `described_lang`/`content` 已按 lang 过滤）。
+        """
+        return SmStrategyBundle(
+            primary_prompt=data.get("primary_prompt") or "",
+            tools=list(data.get("tools") or []),
+            skills=list(data.get("skills") or []),
+            assets=list(data.get("assets") or []),
+            lang=lang,
+        )
 
 
 class StrataMatcher:
@@ -67,7 +86,7 @@ class StrataMatcher:
         self.no_strata = no_strata
         self.http_sm = http_sm or StrataHttpSm(base_url=base_url, no_strata=no_strata)
 
-    async def query(self, req: SmRequest) -> Optional[str]:
+    async def query(self, req: SmRequest) -> Optional[SmStrategyBundle]:
         if self.no_strata:
             return None
         return await self.http_sm.query(req)
@@ -92,11 +111,12 @@ class PhasePlanPlanner:
     async def plan(self, goal_repr: Any, context: dict) -> PhasePlan:
         lang = context.get("lang", "zh")
         phase, goal = self._resolve_phase(goal_repr)
-        prompt = await self.sm_seam.query(self._make_request(goal, lang, phase))
-        if prompt is not None:
+        bundle = await self.sm_seam.query(self._make_request(goal, lang, phase))
+        if bundle is not None:
             if self._llm is not None:
                 try:
-                    phases = await self._parse_with_llm(prompt, goal, lang)
+                    phases = await self._parse_with_llm(bundle.primary_prompt, goal, lang,
+                                                        bundle=bundle)
                     if phases is not None:
                         return phases
                 except Exception:
@@ -133,7 +153,16 @@ class PhasePlanPlanner:
             return tools
         return []
 
-    async def _parse_with_llm(self, prompt: str, goal: str, lang: str) -> Optional[PhasePlan]:
+    async def _parse_with_llm(self, prompt: str, goal: str, lang: str,
+                              bundle: Optional[SmStrategyBundle] = None) -> Optional[PhasePlan]:
+        """Phase A（sm _b）：只靠 LLM 解析相位树结构（index/name/description/mode/gates）。
+
+        tools/skills/assets **不再靠 LLM 猜**，而由 `bundle` 注入：
+        - `tools` = bundle.tools（结构化工具切片）；
+        - `skills_prompt` = bundle.skills 的 `content` 字段拼接（content 已按 lang 单值）；
+        - `assets` = bundle.assets。
+        bundle 为 None（无结构化素材）→ 回落 LLM 从响应解析（向后兼容）。
+        """
         messages = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"用户意图：{goal}"},
@@ -143,13 +172,24 @@ class PhasePlanPlanner:
         phases = data.get("phases", [])
         if not phases:
             return None
+        skills_prompt = self._join_skills(bundle.skills) if bundle is not None else ""
         return PhasePlan(phases=[
             PhaseDef(index=int(p["index"]), name=p["name"], description=p.get("description", ""),
                      mode=p.get("mode", "single_ai"), gates=PhaseGates.from_dict(p.get("gates", {})),
-                     tools=p.get("tools") or [], skills_prompt=p.get("skills_prompt", ""),
-                     assets=p.get("assets"))
+                     tools=(bundle.tools if bundle is not None else (p.get("tools") or [])),
+                     skills_prompt=(skills_prompt or (p.get("skills_prompt", ""))),
+                     assets=(bundle.assets if bundle is not None else p.get("assets")))
             for p in phases
         ])
+
+    @staticmethod
+    def _join_skills(skills: list) -> str:
+        """把 bundle.skills 的 `content` 字段拼接成 skills_prompt（content 已按 lang 单值）。"""
+        parts = []
+        for s in skills or []:
+            if isinstance(s, dict) and s.get("content"):
+                parts.append(s["content"])
+        return "\n".join(parts)
 
 
 async def _maybe_await(value):

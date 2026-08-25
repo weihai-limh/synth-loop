@@ -343,20 +343,58 @@ class SmRequest:
     `phase_path` 为树路径（四缝共用寻址坐标），替换旧 `phase_meta` 手工拼 name/description。
     """
 
-    def __init__(self, phase_path: Optional[list], intent: str, lang: str = "zh",
+    def __init__(self, phase_path: Optional[list], intent: str, lang: str = "en",
                  name: Optional[str] = None, description: Optional[str] = None):
         self.phase_path = phase_path
         self.intent = intent
-        self.lang = lang
+        self.lang = lang  # 默认对齐 sm _b（缺省 en）；必须真正透传给 sm（StrataHttpSm 构造请求带 lang）
         self.name = name
         self.description = description
 
 
-class SmResponse:
-    """sm 缝响应：取回的策略内容（prompt）。"""
+class SmStrategyBundle:
+    """sm 缝返回的结构化相位策略包（对齐 sm QueryResponse _b 契约）。
 
-    def __init__(self, prompt: Optional[str] = None):
+    - `primary_prompt`: 按 lang 输出的主提示词。
+    - `tools`/`skills`/`assets`: 结构化素材（sm 查询响应已是 compact 单值——`_lang`/`content`
+      已按 lang 过滤，pk 直接消费，无需自己解析 `*_lang` 字典）。
+    """
+
+    def __init__(self, primary_prompt: str = "", tools: Optional[list] = None,
+                 skills: Optional[list] = None, assets: Optional[list] = None,
+                 lang: Optional[str] = None):
+        self.primary_prompt = primary_prompt
+        self.tools = tools or []
+        self.skills = skills or []
+        self.assets = assets or []
+        self.lang = lang
+
+    def to_dict(self) -> dict:
+        return {"primary_prompt": self.primary_prompt, "tools": self.tools,
+                "skills": self.skills, "assets": self.assets, "lang": self.lang}
+
+
+class SmResponse:
+    """sm 缝响应：取回的策略内容（prompt）。
+
+    Phase A（sm _b 升级）：承载 `SmStrategyBundle`——`prompt` 保留（作为 `primary_prompt`
+    别名，向后兼容），并新增 `tools`/`skills`/`assets`/`lang` 字段。
+    """
+
+    def __init__(self, prompt: Optional[str] = None,
+                 bundle: Optional[SmStrategyBundle] = None,
+                 tools: Optional[list] = None, skills: Optional[list] = None,
+                 assets: Optional[list] = None, lang: Optional[str] = None):
         self.prompt = prompt
+        self.tools = tools if tools is not None else (bundle.tools if bundle else [])
+        self.skills = skills if skills is not None else (bundle.skills if bundle else [])
+        self.assets = assets if assets is not None else (bundle.assets if bundle else [])
+        self.lang = lang if lang is not None else (bundle.lang if bundle else None)
+
+    @classmethod
+    def from_bundle(cls, bundle: SmStrategyBundle) -> "SmResponse":
+        return cls(prompt=bundle.primary_prompt, tools=bundle.tools, skills=bundle.skills,
+                   assets=bundle.assets, lang=bundle.lang)
 
 
 class PipelineSession:

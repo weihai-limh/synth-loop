@@ -1353,4 +1353,4 @@ packets:
 ---
 
 *文档版本：v1.3*
-*更新时间：2026-08-25 | v0.1.2_d：任务管理 cancel 端点语义变更（旧 TaskChainExecutor 删除，改 TaskChainService 单步闭环；cancel 降级为历史兼容端点）+ DB 统一 / logic_category 外置（详见设计文档 §七）*
+*更新时间：2026-08-26 | v0.1.2_e：pk 内核集成（内部改造，对外 API 语义无变化）——相位内核 copy sm 缝（SmStrategyBundle）+ i18n（sl 单语默认 zh）+ 装配接 sm（PhasePlanPlanner）+ `_PkGateAdapter` 接通真实 `PhaseGateExecutor`。相位触发标签/多轮协议/`synth_pipeline` 字段均不变。前置 v0.1.2_d：任务管理 cancel 端点语义变更（旧 TaskChainExecutor 删除，改 TaskChainService 单步闭环；cancel 降级为历史兼容端点）+ DB 统一 / logic_category 外置（详见设计文档 §七）*
