@@ -95,7 +95,7 @@ document_service:
 
 # v0_1_1 新增配置段
 auth:
-  enabled: false       # 是否开启用户ID校验
+  enabled: true        # 默认开启用户ID校验（不假设内网）
   required: false      # 是否强制校验（仅 enabled=true 时生效）
 
 session_memory:

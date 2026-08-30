@@ -1,7 +1,7 @@
 # synth-loop 设计文档
 
 > **文档类型**：技术设计
-> **版本**：v0.1.2_e | **日期**：2026-08-26
+> **版本**：v0.1.2_e | **日期**：2026-08-29
 > **适用范围**：synth-loop
 > **关联文档**：`product_zh.md`、`api_zh.md`
 >
@@ -97,7 +97,7 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | 复杂度分类 | `complexity_classifier.py` | 规则匹配 → chat / task_chain / fractal |
 | 执行路由 | `execution_router.py` | 分形决策 + 模型选择 + 下游调用编排 |
 | 任务链服务 | `task_chain_service.py` | 单步闭环：写 tasks 表(queued)→委托 text-cli --async →轮询→确认闸(内部 `_dispatch_confirm`)→回写(completed/error)，承接 G3 落库责任 |
-| 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
+| 上下文注入 | `context_injector.py` | 任务链步骤上下文注入（已完成步骤 + 当前步骤） |
 | 上下文压缩 | `context_compressor.py` | 上游过滤——按复杂度三态处理 system 消息 |
 | 上下文标签管理 | `context_manager.py` | 按标签 load/unload/list/refresh 管理永久区上下文 |
 | 流式处理 | `streaming_handler.py` | OpenAI + Anthropic SSE 格式输出 |
@@ -137,7 +137,6 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 | 文档卸载 | `unload_document.py` | 从上下文区移除 |
 | text-cli 发现 | `discover_textcli.py` | 发现可用指令（v0.1.2_a：走强化客户端 discover） |
 | text-cli 调用 | `call_textcli.py` | 执行指令（v0.1.2_a：走强化客户端 call） |
-| 上下文标签管理 | `context_manager.py` | 按标签管理永久区上下文 |
 
 
 ---
@@ -149,7 +148,7 @@ synth-loop：请求  → 分形路由（选一条路径）→ 上下文内核（
 ```
 客户端 → POST /v1/chat/completions
   │
-  ├── [可选的] auth 中间件 → x-synthloop-user-id 校验 → 401 或继续
+  ├── auth 中间件（enabled/required 配置）→ x-synthloop-user-id 校验 → 401 或继续
   │    代码: src/sl-py/app/middleware/auth.py
   │
   ├── [可选的] 会话复用 → session_manager.get_or_create()
@@ -221,7 +220,7 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
   ├── 前置: 消息前置检查（Task-ID / user-memory）
   ├── 分类: ComplexityClassifier.classify()
   ├── 增强: strata-match 查询 → primary_prompt + tools + assets
-  ├── 注入: ContextInjector → XML 标签上下文组装
+  ├── 注入: ck 内核拼装 → <context> XML 上下文组装
   │          <context>
   │            <strategy>...</strategy>
   │            <user-memory>...</user-memory>
@@ -279,8 +278,11 @@ config.yaml ──→ load_config() ──→ get_section() / get_*_settings()
 | `/admin/tasks` | HTML | GET | 无 | `admin.py` |
 | `/admin/jobs` | HTML | GET | 无 | `admin.py` |
 | `/admin/users` | HTML | GET | 无 | `admin.py` |
+| `/admin/listeners` | JSON | POST/GET/DELETE | 无 | `admin.py` |
+| `/admin/analysis` | JSON | GET | 无 | `admin.py` |
 | `/api/v1/tasks/{id}` | JSON | GET | 无 | `tasks.py` |
 | `/api/v1/tasks/{id}/cancel` | JSON | POST | 无 | `tasks.py` |
+| `/gate-manager/config` | JSON | GET/PATCH | 无 | `gate.py` |
 
 ### 内部服务间契约
 
@@ -318,24 +320,26 @@ src/sl-py/
 |--------|------|--------|-----------|
 | `strata_match` | `config.yaml` | url=localhost:13156, mock=false | `strata_match_client.py` |
 | `runtime_endpoints` | `config.yaml` | enabled=true, default_alias, seeds（v0.1.2_a，替代旧 `textcli` 段） | `runtime_endpoints.py` |
-| `pipelines_api` | `config.yaml` | enabled=false（v0.1.2_a 9 端点开关） | `routers/pipeline.py` |
+| `pipelines_api` | `config.yaml` | enabled=false（v0.1.2_a 9 端点开关；配置段保留，当前无对应 router 实现） | — |
 | `downstream_llm` | `config.yaml` | api_base, api_key, default_model | `downstream_llm.py` |
-| `auth` | `config.yaml` | enabled=false, required=false | `middleware/auth.py` |
+| `auth` | `config.yaml` | enabled=true, required=false（不假设内网，默认开启用户 ID 校验） | `middleware/auth.py` |
 | `session_memory` | `config.yaml` | enabled=true | `routers/chat.py` |
-| `async_tasks` | `config.yaml` | enabled=false, max_per_user=3 | `routers/chat.py` |
+| `async_tasks` | `config.yaml` | enabled=true, max_per_user=3（v0.1.2_d：服务级异步开关打开） | `routers/chat.py` |
 | `packets` | `config.yaml` | enabled=true, ttl_seconds=1800, types=13 类准入列表（_c） | `packet_store.py`（v0.1.1；_c 类型准入配置驱动） |
 | `endpoints` | `model_config.yaml` | 端点池定义 | `execution_router.py` |
 | `llm_routing` | `model_config.yaml` | 路由映射（_b：多场景唯一真源，任意 service 透传无白名单截断） | `execution_router.py` → `model_selector.py` → `sl_llm_provider.py` |
 | `llm_gateway` | `model_config.yaml` | enabled=false, gateways（多网关注册表，默认未启用） | `downstream_llm.py` |
 | `rules` | `complexity_rules.yaml` | chat/task_chain 规则 | `complexity_classifier.py` |
-| `logic_categories` | `config.yaml`（来源于外置 `logic_categories.yaml`，真源为 `complexity_rules.yaml` 的 subtypes） | B3 逻辑分类外置：细分路由命中 → 直查细分路由；枚举校验（key 须为 subtypes 真源子集） | `execution_router.py` / `model_selector.py`（v0.1.2_d） |
+| `logic_categories` | `model_config.yaml`（key ⊆ `complexity_rules.yaml` subtypes 真源） | B3 逻辑分类外置：细分路由命中 → 直查细分路由；枚举校验（key 须为 subtypes 真源子集） | `execution_router.py` / `model_selector.py`（v0.1.2_d） |
 
 ### 6.3 持久化
 
 | 表 | 文件 | 用途 | 记录数上限 |
 |----|------|------|:---------:|
 | `session_snapshots` | `gateway.db` | 会话持久化（permanent_system_prompt, temp_history, snapshot） | 无 |
-| `events` | `events.jsonl` | 事件日志 | 无 |
+| `message_logs` | `gateway.db` | 消息记录（session_id/round_number/direction request\|response/payload） | 无 |
+| `job_store` | `gateway.db` | Job 存储（事件总线 listener 等：job_type/status/config_json/result_json） | 无 |
+| `events` | `events.jsonl`（文件，非 DB 表） | 事件日志（供 `/admin/analysis` 离线分析） | 无 |
 | `users` | `gateway.db` | 用户认证（v0.1.1） | 无 |
 | `tasks` | `gateway.db` | 异步任务（v0.1.1）；**v0.1.2_d 重写**：旧 `TaskChainExecutor` 删除，落库责任改由 `TaskChainService.run()` 承接（queued→running→completed/error 状态机，经 `get_shared_db()` 统一连接串行写），确认闸为内部私有 `_dispatch_confirm`（非硬依赖） | 无 |
 | `runtime_endpoints` | `gateway.db` | tc 端点配置面（v0.1.2_a）：alias 多物理行 + rank 降级 + token 加密 | 无 |
@@ -361,7 +365,7 @@ src/sl-py/
 
 | 维度 | 措施 |
 |------|------|
-| 网络分层 | `auth.enabled` 配置控制，默认关闭（开箱即用） |
+| 网络分层 | `auth.enabled` 配置控制，默认开启（不假设内网）；`required=false` 时"有则校验、无则放行" |
 | Session 隔离 | `x-synthloop-session-id` 隔离会话，`x-synthloop-user-id` 隔离用户 |
 | token 双轨 | `x-synthloop-token`（user/service/admin scope）验权 → `x-synthloop-user-id` 归身份；运行时表管理 API 要求 admin scope |
 

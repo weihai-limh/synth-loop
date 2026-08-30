@@ -171,7 +171,7 @@ curl http://localhost:13155/v1/messages \
 
 synth-loop 本身不验证客户端 API Key。客户端可以传递任意值作为 `api_key`。
 
-v0_1_1 起支持 `x-synthloop-user-id` Header 认证，三层行为（`auth.enabled` + `auth.required`）。默认关闭（`auth.enabled=false`），开箱即用。
+v0_1_1 起支持 `x-synthloop-user-id` Header 认证，三层行为（`auth.enabled` + `auth.required`）。默认开启（`auth.enabled=true`，不假设内网）；`required=false` 时"有则校验、无则放行"。
 
 **v0.1.2_a 起 token 双轨（先验权再归身份）**：
 
@@ -184,7 +184,7 @@ v0_1_1 起支持 `x-synthloop-user-id` Header 认证，三层行为（`auth.enab
 - **Anthropic 格式**：`x-api-key: <any-string>`（可选）
 - **用户认证**：`x-synthloop-user-id: sl-{uuid}`（v0_1_1 新增，可选）
 - **权限认证**：`x-synthloop-token: <token>`（v0.1.2_a 新增，可选）
-- **管理面**：`/api/v1/runtime-endpoints` CRUD 要求 **admin scope**（3.12），普通 user/service token → 403
+- **管理面**：`/api/v1/runtime-endpoints` CRUD 要求 **admin scope**，普通 user/service token → 403
 
 synth-loop 使用配置文件中的 `downstream_llm.api_key` 调用下游 LLM。
 
@@ -355,7 +355,7 @@ synth-loop 会自动执行工具调用，将结果注入推理循环，最终返
 }
 ```
 
-干预流程：`GET /chatgate/{context_id}`（peek）→ `POST /chatgate/{context_id}`（amend）→ 放行出结果。`gate_manager` 默认 `all_off`（关闸直推），仅显式切换后才开闸。
+干预流程（ck 侧）：`GET /chatgate/{context_id}`（peek）→ `POST /chatgate/{context_id}`（amend）→ 放行出结果。**当前 sl 侧仅暴露 `/gate-manager/config` 配置面，`/chatgate` 代理端点待 vendored 后补充**（见 `routers/gate.py`）。`gate_manager` 默认 `all_off`（关闸直推），仅显式切换后才开闸。
 
 ---
 
@@ -611,7 +611,7 @@ GET /health
 | `active_combo` | 切换预制闸组合（未知 → 400） |
 | `meta_gate` | `on`/`off`/`auto`——控制 ck 推理闸本身是否参与（on→auto park 可干预 / off→closed 直推） |
 
-**开闸行为**：当 `meta_gate` 为 `on`/`auto` 时，主路径与相位路径的上下文会被 ck park，chat 响应返回 `gate:"pending"` + `context_id`（见聊天补全的 `gate` 字段），可经 `GET/POST /chatgate/{context_id}`（ck 侧）peek/amend 干预后放行。
+**开闸行为**：当 `meta_gate` 为 `on`/`auto` 时，主路径与相位路径的上下文会被 ck park，chat 响应返回 `gate:"pending"` + `context_id`（见聊天补全的 `gate` 字段），可经 `GET/POST /chatgate/{context_id}`（ck 侧）peek/amend 干预后放行（**该代理端点当前未实现**，sl 侧仅 `/gate-manager/config`）。
 
 ---
 
@@ -714,7 +714,7 @@ GET /health
 
 ### 运行时端点管理（v0.1.2_a 新增）
 
-> tc 消费链路配置面。管理 API 要求 **admin scope**（3.12），token 脱敏返回。
+> tc 消费链路配置面。管理 API 要求 **admin scope**，token 脱敏返回。
 
 #### GET /api/v1/runtime-endpoints
 
@@ -1293,7 +1293,7 @@ curl http://localhost:13155/v1/chat/completions \
 }
 ```
 
-详细接口文档请参阅 [strata-match API.md](../../strata-match/docs/API.md)。
+详细接口文档请参阅 [strata-match API](../../strata-match/docs/api_zh.md)。
 
 ### synth-loop → text-cli
 
@@ -1320,7 +1320,7 @@ curl http://localhost:13155/v1/chat/completions \
 
 ## 配置参考
 
-完整配置项请参阅 [README.md](../../README.md#配置) 和 [设计文档](./design_zh.md#七配置与持久化设计)。
+完整配置项请参阅 [设计文档](./design_zh.md#六配置与持久化设计)（配置表见 §6.2）。
 
 关键配置：
 
@@ -1349,8 +1349,3 @@ packets:
 ```
 
 **模型多场景**（`model_config.yaml`，_b 唯一真源）：`llm_routing` 定义任意场景（chat/prompt_chat/task_chain/analysis/planning/summarize + 未来新增），`model_selector` 直接透传 service 到 `execution_router`——配置加场景即接通，无需改代码。`llm_gateway` 多网关注册默认关闭（`enabled=false`）。
-
----
-
-*文档版本：v1.3*
-*更新时间：2026-08-26 | v0.1.2_e：pk 内核集成（内部改造，对外 API 语义无变化）——相位内核 copy sm 缝（SmStrategyBundle）+ i18n（sl 单语默认 zh）+ 装配接 sm（PhasePlanPlanner）+ `_PkGateAdapter` 接通真实 `PhaseGateExecutor`。相位触发标签/多轮协议/`synth_pipeline` 字段均不变。前置 v0.1.2_d：任务管理 cancel 端点语义变更（旧 TaskChainExecutor 删除，改 TaskChainService 单步闭环；cancel 降级为历史兼容端点）+ DB 统一 / logic_category 外置（详见设计文档 §七）*

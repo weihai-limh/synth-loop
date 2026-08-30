@@ -32,7 +32,7 @@
 | 推理缝 | `inference_seam.py` | SlInferenceSeam：pk 推理缝，暴露到 build_messages，经 ck 拼装 + 闸 |
 | 统一闸 | `gate_manager.py` | 跨内核闸编排：GateType 五类 + 组合函数 + 跨内核循环 |
 | 任务链服务 | `task_chain_service.py`（v0.1.2_d 新增，取代已删 `task_chain_executor.py` #6 红线） | 单步闭环：写 tasks 表(queued)→委托 text-cli --async→轮询→确认闸(内部 `_dispatch_confirm`)→回写(completed/error)，承接 G3 落库责任 |
-| 上下文注入 | `context_injector.py` | XML 标签体系上下文组装 |
+| 上下文注入 | `context_injector.py` | 任务链步骤上下文注入（已完成步骤 + 当前步骤） |
 | 协议翻译 | `protocol_translator.py` | Anthropic ↔ OpenAI 格式互转 |
 | 降级管理器 | `degradation_manager.py` | 三层降级逻辑 |
 | 相位编排器 | `phase_chat_orchestrator.py` | chat 多轮契约（_e：planner 接 sm=PhasePlanPlanner，从 config.strata_match.url 取地址；`handle(..., lang="zh")` 单语硬编码） |
@@ -44,10 +44,20 @@
 ### 🟢 快速通道（2 分钟）
 
 ```bash
-pip install -r requirements.txt
-PYTHONPATH=src python -m app.main
+# Windows 解包后
+deploy/win/synth-loop-v0.1.2/start.bat
 
-# 验证
+# Linux 解包后
+bash deploy/linux/synth-loop-v0.1.2/start.sh
+
+# 容器（装有 Docker 的机器）
+python scripts/release/container/build.py
+docker run -d -p 13155:13155 synth-loop:latest
+```
+
+起服务后验证：
+
+```bash
 curl -s http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
@@ -104,7 +114,7 @@ curl http://localhost:13155/v1/chat/completions \
 | **多相位推理** | 复杂任务拆为分形相位树自动推进——路径确认/审批/质量闸控制审查深度，只回退当前相位 |
 | **统一闸** | gate_manager 跨内核编排 ck 推理闸 + pk 人闸 + 元闸，所有 chat 上下文可被闸优化（开闸时 park，可 peek/amend） |
 | **LLM 层（多场景透传）** | llm_routing 多场景配置唯一真源（planning/summarize/chat/... 任意 service 透传）+ 模型级降级（503 切同池/502 切端点） |
-| **统一 权限** | 权限（token）+ 身份（user-id）双轨，先验权再归身份；运行时表管理 API admin scope |
+| **统一权限** | 权限（token）+ 身份（user-id）双轨，先验权再归身份；运行时表管理 API admin scope |
 | **永久区通道** | `/v1/longdata` 引入 doc/memory 到指定会话永久区（`loaded_docs` / `permanent_system_prompt`），长期存在、可删除/列出——与临时区 packets 对称 |
 | **类型准入配置化** | packets 类型准入从代码写死改为 `config.yaml packets.types`，新增载荷类型改配置即可（空配置回落内置默认） |
 | **相位产物落 SQLite** | pk 相位产物经 `SlArtifactStore` 桥接落 SQLite `artifacts` 表，不再只进内存——`/v1/artifacts` 可对外取，跨相位上下文回链可靠 |
@@ -139,9 +149,34 @@ curl http://localhost:13155/v1/chat/completions \
 
 
 
+## 它不是什么：边界与诚实
+
+**synth-loop 不是：**
+- **不是匹配引擎**：策略匹配由外部 strata-match 负责，sl 只消费它的输出。
+- **不是透传网关**：不做请求透传，每个请求都经历整套编排决策。
+- **不是 LLM 框架**：不封装 LLM 调用——推理经推理缝收敛到唯一推理落点后交给下游 LLM。
+- **不是策略持有者**：不持有策略，策略资产由外部策略服务管理。
+- **不是指令执行者**：不执行指令，执行在 text-cli 运行时。
+
+**诚实标注：**
+- 相位编排当前固定以**中文推理资源**推进（`handle(..., lang="zh")` 单语硬编码）——这是**内部行为**，与输入问题使用的语言无关（输入可为任意语言）。
+- Anthropic 下游 SSE（OpenAI 上游 → Anthropic 下游）计划在后续版本支持。
+
+>'相位编排当前单语硬编码'是LLM获取的是中文的推理资源进行推理,是内部行为,与输入问题使用的语言无关.完全稳定后会开放多语言版本.
+---
+
+## 信任与安全边界
+
+**不假设内网**：默认 `auth.enabled=true`（开启用户 ID 校验）；`required=false` 时"有则校验、无则放行"，`required=true` 时强制校验（未携带有效 user-id 返回 401）。
+
+- **token 双轨**：`x-synthloop-token`（user/service/admin scope，sha256 hash 校验，先验权）+ `x-synthloop-user-id`（身份，后归身份）。
+- **admin scope**：运行时表管理 API `/api/v1/runtime-endpoints` 要求 admin scope，普通 token → 403。
+- **下游 LLM key**：配置在 `config.yaml` 的 `downstream_llm.api_key`，建议用 `${ENV_VAR}` 环境变量注入，不硬编码进 repo。
+- **tc 令牌**：运行时表 token 加密落库（`SELF_TOKEN_ENC_KEY`）+ 管理 API 脱敏返回。
+
+---
+
 ## 许可证
 
-| 代码目录 | 协议 | 说明 |
-|----------|------|------|
-| `src/sl-py/`、`src/ck-py/` | Apache 2.0 | 核心编排引擎，自由使用 |
+**Apache 2.0** · [LICENSE](LICENSE) · [GitHub](https://github.com/weihai-limh/synth-loop)
 

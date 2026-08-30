@@ -1,7 +1,8 @@
 # synth-loop 官方 Docker 镜像
 #
 # 构建：
-#   docker build -f deploy/container/Dockerfile -t synth-loop:latest .
+#   docker compose -f deploy/container/docker-compose.yml build
+#   # 或： docker build -f deploy/container/Dockerfile -t synth-loop:latest .
 #
 # 运行（内置数据目录自动创建）：
 #   docker run -d -p 13155:13155 synth-loop:latest
@@ -9,8 +10,10 @@
 # 运行（外挂数据目录，数据持久化）：
 #   docker run -d -p 13155:13155 \
 #     -v /host/path/to/data:/app/src/data \
-#     -e OPENAI_API_KEY=sk-xxx \
 #     synth-loop:latest
+#
+# 注意：运行包位于 src/sl-py/（app 包在 src/sl-py/app），
+#       因此镜像内 COPY 的是 src/sl-py/，PYTHONPATH 指向 /app/src。
 
 FROM python:3.13-slim
 
@@ -20,11 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 安装 Python 依赖 ──────────────────────────────────────
-COPY src/requirements.txt /tmp/requirements.txt
+COPY src/sl-py/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# ── 复制源码 ──────────────────────────────────────────────
-COPY src/ /app/src/
+# ── 复制源码（运行包 src/sl-py -> /app/src） ──────────────
+COPY src/sl-py/ /app/src/
 WORKDIR /app/src
 
 # ── 环境变量 ──────────────────────────────────────────────

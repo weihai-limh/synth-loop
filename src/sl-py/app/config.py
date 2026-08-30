@@ -105,8 +105,8 @@ def get_section(section: str) -> dict[str, Any]:
 # ═══════════════════════════════════════════════════════════
 
 class AuthSettings(BaseModel):
-    """用户认证配置"""
-    enabled: bool = False
+    """用户认证配置（默认开启，不假设内网）"""
+    enabled: bool = True
     required: bool = False
 
 

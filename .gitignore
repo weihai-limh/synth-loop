@@ -20,3 +20,6 @@ __pycache__/
 # Environment
 .env
 .env.local
+
+# Mock server (dev-only, not distributed)
+src/sl-web-chat/mock-server/

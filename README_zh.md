@@ -10,10 +10,23 @@
 
 ## ⚡ 30 秒看到效果
 
-```bash
-pip install -r src/sl-py/requirements.txt
-PYTHONPATH=src/sl-py python -m app.main
+用预构建制品，解包即起（想自构建？见 `scripts/docs/release_zh.md`）：
 
+```bash
+# Windows 解包后
+deploy/win/synth-loop-v0.1.2/start.bat
+
+# Linux 解包后
+bash deploy/linux/synth-loop-v0.1.2/start.sh
+
+# 容器（装有 Docker 的机器）
+python scripts/release/container/build.py
+docker run -d -p 13155:13155 synth-loop:latest
+```
+
+起服务后验证：
+
+```bash
 curl -s http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
@@ -46,6 +59,15 @@ synth-loop 是一个 **以 LLM 网关形态暴露的任务处理中枢**——**
 
 > **前置依赖**：完整体验需要策略服务运行在 `localhost:13156`。synth-loop 可降级独立运行（使用内置默认策略 + 工具查询）。
 
+**是什么 / 不是什么**：
+
+| 是 | 不是 |
+|------|------|
+| 任务处理中枢——分派 + 收束（`sl_llm_provider` 唯一推理落点） | 匹配引擎（策略匹配由外部 strata-match 负责） |
+| 协议兼容端点——OpenAI + Anthropic 双协议接入 | API 代理/中立网关——不做请求透传，每个请求都经历编排决策 |
+| 上下文内核承接方——ck 六层拼装 + 闸监听 | LLM 框架（不封装 LLM 调用） |
+| 任务处理者——分形路由、相位推理（pk）、统一闸、统一数据面 | 策略持有者（策略由外部策略服务管理） |
+
 ---
 
 
@@ -54,10 +76,20 @@ synth-loop 是一个 **以 LLM 网关形态暴露的任务处理中枢**——**
 ### 1️⃣ 快速通道（2 分钟）
 
 ```bash
-pip install -r src/sl-py/requirements.txt
-PYTHONPATH=src/sl-py python -m app.main
+# Windows 解包后
+deploy/win/synth-loop-v0.1.2/start.bat
 
-# 验证
+# Linux 解包后
+bash deploy/linux/synth-loop-v0.1.2/start.sh
+
+# 容器（装有 Docker 的机器）
+python scripts/release/container/build.py
+docker run -d -p 13155:13155 synth-loop:latest
+```
+
+起服务后验证：
+
+```bash
 curl http://localhost:13155/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'
@@ -180,48 +212,31 @@ synth-loop/
 
 ## 文档地图
 
-| 类别 | 文件 | 说明 |
-|------|------|------|
-| 📖 产品文档 | [docs/product_zh.md](docs/product_zh.md) | 产品定位、能力、上手 |
-| 🏗️ 设计文档 | [docs/design_zh.md](docs/design_zh.md) | 系统架构、数据流、配置 |
-| 📡 API 参考 | [docs/api_zh.md](docs/api_zh.md) | 端点定义、编排语义 |
+| 你是 | 去这里 |
+|:---|:---|
+| 完整中文 | [在线地址](https://github.com/weihai-limh/synth-loop/blob/main/README_zh.md) 或者 [相对地址](README_zh.md) |
+| 产品文档 | [在线地址](https://github.com/weihai-limh/synth-loop/blob/main/docs/product_zh.md) 或者 [相对地址](docs/product_zh.md) |
+| 了解技术架构与实现细节 | [在线地址](https://github.com/weihai-limh/synth-loop/blob/main/docs/design_zh.md) 或者 [相对地址](docs/design_zh.md) |
+| API 参考 | [在线地址](https://github.com/weihai-limh/synth-loop/blob/main/docs/api_zh.md) 或者 [相对地址](docs/api_zh.md) |
 
 ---
 
-## 九、开发状态与版本模型
+## 开发状态与版本模型
 
 | 版本 | 验收标准 | 状态 |
 |------|---------|:----:|
 | v0.1 | 112/112 静态测试 PASS，dynamic 全部通过 | ✅ 已发布 |
 | v0.1.1 | 189 静态测试 PASS，9 动态脚本就绪 | ✅ 已发布 |
-| v0.1.2 | 相位推理（pk）+ 上下文内核（ck）+ 统一闸 + 三前置 + 主路径过闸 | ✅（130 测试通过）） |
+| v0.1.2 | 相位推理（pk）+ 上下文内核（ck）+ 统一闸 + 三前置 + 主路径过闸 | ✅（130 测试通过） |
+| v0.1.2_a | tc 消费链路收敛（runtime-endpoints + 强化客户端 + 统一 token + 产物数据面） | ✅ 补强（不升版本号） |
+| v0.1.2_b | 统一闸配置面（`/gate-manager/config`）+ llm_routing 多场景唯一真源 | ✅ 补强（不升版本号） |
+| v0.1.2_c | 数据面双通道（packets 类型准入配置化 + longdata 永久区）+ artifacts 放宽 | ✅ 补强（不升版本号） |
+| v0.1.2_d | logic_category 外置 + TaskChainService 单步闭环（旧 TaskChainExecutor 删除） | ✅ 补强（不升版本号） |
+| v0.1.2_e | pk 内核集成（sm 缝 + i18n 单语 + PhasePlanPlanner 接 sm + _PkGateAdapter 真实闸） | ✅ 补强（不升版本号） |
 
-
----
-
-## 十、参与
-
-| 你想做什么 | 去这里 |
-|-----------|--------|
-| 快速上手 | 看上面的「三步开始用」 |
-| 了解架构 | [docs/design_zh.md](docs/design_zh.md) |
-
----
-
-
-## 管理面板
-
-| 面板 | 地址 |
-|------|------|
-| 会话监控 | http://localhost:13155/admin/sessions |
-| 任务链监控 | http://localhost:13155/admin/tasks |
-| Job 管理 | http://localhost:13155/admin/jobs |
-| 用户管理 | http://localhost:13155/admin/users |
 
 ---
 
 ## 许可证
 
-| 代码目录 | 协议 | 说明 |
-|----------|------|------|
-| `src/sl-py/app/`、`src/sl-py/public/` | Apache 2.0 | 核心编排引擎，自由使用 |
+**Apache 2.0** · [LICENSE](LICENSE) · [GitHub](https://github.com/weihai-limh/synth-loop)
