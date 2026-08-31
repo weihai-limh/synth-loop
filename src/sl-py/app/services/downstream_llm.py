@@ -238,12 +238,12 @@ class DownstreamLLM:
                 if resp.status_code == 503:
                     # 模型不可用 → 同池切模型（下一级）
                     last_exc = httpx.HTTPStatusError(f"503 model unavailable at {level}", request=resp.request, response=resp)
-                    logger.warning(f"LLM 503 @ {service_name}/{level}（模型不可用），切下一级")
+                    logger.warning(f"LLM 503 @ {service_name}/{level} (model unavailable), switching to next tier")
                     continue
                 if resp.status_code in (502, 504):
                     # 后端/超时 → 切端点（下一级）
                     last_exc = httpx.HTTPStatusError(f"{resp.status_code} backend error at {level}", request=resp.request, response=resp)
-                    logger.warning(f"LLM {resp.status_code} @ {service_name}/{level}（后端/超时），切下一级")
+                    logger.warning(f"LLM {resp.status_code} @ {service_name}/{level} (backend/timeout), switching to next tier")
                     continue
                 resp.raise_for_status()
                 return resp.json()
@@ -252,10 +252,10 @@ class DownstreamLLM:
                 if e.response.status_code in (400, 401, 403, 422):
                     raise
                 last_exc = e
-                logger.warning(f"LLM 调用失败 @ {service_name}/{level}: {e}，切下一级")
+                logger.warning(f"LLM call failed @ {service_name}/{level}: {e}, switching to next tier")
             except httpx.HTTPError as e:
                 last_exc = e
-                logger.warning(f"LLM 端点不可达 @ {service_name}/{level}: {e}，切下一级")
+                logger.warning(f"LLM endpoint unreachable @ {service_name}/{level}: {e}, switching to next tier")
 
         raise last_exc or RuntimeError(f"LLM 降级链耗尽: {service_name}")
 

@@ -77,3 +77,14 @@ def create_app() -> FastAPI:
 
 # 创建应用实例
 app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    from .config import get_config
+    _server = get_config().get("server", {})
+    uvicorn.run(
+        "app.main:app",
+        host=_server.get("host", "0.0.0.0"),
+        port=_server.get("port", 13155),
+    )

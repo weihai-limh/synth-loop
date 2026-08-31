@@ -110,7 +110,7 @@ class SlLlmProvider:
                     session_id=session_id,
                 )
                 custom = extract_custom_context(assembled)
-                logger.info(f"sl_llm_provider: 开闸 park (context_id={parked_id}, service={service})")
+                logger.info(f"sl_llm_provider: gate open park (context_id={parked_id}, service={service})")
                 return {
                     "gate": "pending",
                     "context_id": parked_id,
@@ -132,7 +132,7 @@ class SlLlmProvider:
                 **kwargs,
             )
         except Exception as e:
-            logger.error(f"sl_llm_provider 推理失败 (service={service}): {e}")
+            logger.error(f"sl_llm_provider inference failed (service={service}): {e}")
             raise
 
     async def chat_stream(

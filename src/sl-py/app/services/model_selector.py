@@ -38,7 +38,7 @@ class ModelSelector:
             endpoint, model = self._router.resolve_logic_endpoint(logic_category, "primary")
             if endpoint is not None:
                 return endpoint.name, model
-            logger.info(f"ModelSelector: logic_category '{logic_category}' 未配置，回落 service '{service}'")
+            logger.info(f"ModelSelector: logic_category '{logic_category}' not configured, falling back to service '{service}'")
 
         # 2. 回落 service 默认路由
         endpoint, model = self._router.resolve_endpoint(service, "primary")

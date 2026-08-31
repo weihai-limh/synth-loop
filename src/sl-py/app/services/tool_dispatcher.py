@@ -109,14 +109,14 @@ class ToolDispatcher:
             failure_threshold=self._failure_threshold,
             recovery_timeout=self._recovery_timeout,
         )
-        logger.info(f"注册动态工具: {name}")
+        logger.info(f"Registered dynamic tool: {name}")
 
     def unregister_dynamic_tool(self, name: str) -> None:
         """注销动态工具"""
         self.dynamic_tools.pop(name, None)
         self.dynamic_definitions.pop(name, None)
         self.circuit_breakers.pop(name, None)
-        logger.info(f"注销动态工具: {name}")
+        logger.info(f"Unregistered dynamic tool: {name}")
 
     def clear_dynamic_tools(self) -> None:
         """清除所有动态工具"""

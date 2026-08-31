@@ -27,7 +27,7 @@ _ENC_KEY_ENV = "SELF_TOKEN_ENC_KEY"
 def _enc_key() -> Optional[str]:
     key = os.environ.get(_ENC_KEY_ENV, "")
     if not key:
-        logger.warning(f"{_ENC_KEY_ENV} 未配置，token 以明文存储（内网降级）——生产环境必须配置")
+        logger.warning(f"{_ENC_KEY_ENV} not set; tokens stored in plaintext (LAN degraded mode). MUST be configured in production")
         return None
     return key
 
@@ -96,7 +96,7 @@ async def seed_runtime_endpoints(config: dict) -> None:
                 1,
             ),
         )
-        logger.info(f"运行时表种子灌入: {alias}")
+        logger.info(f"Runtime table seed: {alias}")
     await db.commit()
 
 

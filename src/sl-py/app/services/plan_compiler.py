@@ -85,7 +85,7 @@ class PlanCompiler:
             rows = await resolve_alias(alias)
             return rows[0]["url"] if rows else None
         except Exception as e:
-            logger.warning(f"alias 解析失败: {alias} — {e}")
+            logger.warning(f"alias resolution failed: {alias} - {e}")
             return None
 
     # 兼容旧接口（Phase 4 前的 4 个 TestPlanCompiler 测试已按新语义重写）

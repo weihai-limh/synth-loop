@@ -99,10 +99,10 @@ class EnhancedTextCliClient:
                 if rst_err in {"INVALID_PARAMS", "ACCESS_DENIED", "SERVICE_DENIED"}:
                     raise  # 不降级（切换端点无意义）
                 last_err = e
-                logger.warning(f"端点失败，尝试下一 rank: {ep['alias']} — {rst_err or e}")
+                logger.warning(f"Endpoint failed, trying next rank: {ep['alias']} - {rst_err or e}")
             except httpx.HTTPError as e:
                 last_err = e
-                logger.warning(f"端点不可达，尝试下一 rank: {ep['alias']} — {e}")
+                logger.warning(f"Endpoint unreachable, trying next rank: {ep['alias']} - {e}")
 
         raise TextCLITaskError(task_id="?", detail=f"全部端点耗尽: {last_err}")
 
@@ -134,7 +134,7 @@ class EnhancedTextCliClient:
             prompt = f"AI:text-cli;query,{query}"
         result = await self.call(prompt, alias=alias)
         if not result.ok:
-            logger.warning(f"discover 失败: {result.rst_err}")
+            logger.warning(f"discover failed: {result.rst_err}")
             return []
         return result.data.get("directives", [])
 
@@ -161,7 +161,7 @@ class EnhancedTextCliClient:
                     return task  # {task_id, state, result, progress}
             except httpx.HTTPError as e:
                 last_err = e
-                logger.warning(f"poll 端点失败，尝试下一 rank: {ep['alias']} — {e}")
+                logger.warning(f"poll endpoint failed, trying next rank: {ep['alias']} - {e}")
         raise TextCLITaskError(task_id=task_id, detail=f"全部端点耗尽: {last_err}")
 
     async def wait(self, task_id: str, *, timeout: int = 300,
