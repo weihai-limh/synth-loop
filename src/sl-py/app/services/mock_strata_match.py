@@ -10,7 +10,7 @@ class MockStrataMatch:
     """Mock strata-match 服务"""
     
     def __init__(self):
-        logger.info("MockStrataMatch 初始化")
+        logger.info("MockStrataMatch initialized")
     
     async def query(self, user_ask: str, types: str = None) -> dict:
         """模拟 strata-match 查询"""

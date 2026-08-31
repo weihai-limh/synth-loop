@@ -23,3 +23,7 @@ __pycache__/
 
 # Mock server (dev-only, not distributed)
 src/sl-web-chat/mock-server/
+
+# Release intermediates (not committed; only .zip/.tar.gz artifacts are tracked)
+*.sha256
+deploy/*/synth-loop-v*/

@@ -82,9 +82,9 @@ class SlInferenceSeam:
                     # 经 gate_manager 的 intervention 闸（peek/amend 旁路监听）
                     gate_resp = self.gate_manager._intervention_apply(context_id, None)
                     if gate_resp.data:
-                        logger.info(f"SlInferenceSeam: ck 闸监听相位上下文 (context_id={context_id}, routing={routing})")
+                        logger.info(f"SlInferenceSeam: ck gate listening phase context (context_id={context_id}, routing={routing})")
                 except Exception as e:
-                    logger.warning(f"SlInferenceSeam: ck 闸监听跳过: {e}")
+                    logger.warning(f"SlInferenceSeam: ck gate listen skipped: {e}")
 
         # 4. async 唯一推理落点（service=routing → 三档模型；routing 即服务场景）
         response = await self.llm_provider.chat(messages, service=routing)

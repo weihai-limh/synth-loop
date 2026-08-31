@@ -154,9 +154,9 @@ def init_services() -> None:
         from ..services.kernel_adapters import build_sl_context_kernel
         _ck = build_sl_context_kernel()
         get_sl_llm_provider().set_ck(_ck)
-        logger.info("sl_llm_provider ck 内核已注入（主路径过闸就绪）")
+        logger.info("sl_llm_provider ck kernel injected (main path gate-ready)")
     except Exception as e:
-        logger.warning(f"sl_llm_provider ck 注入失败（降级无闸）: {e}")
+        logger.warning(f"sl_llm_provider ck injection failed (degraded, no gate): {e}")
 
     logger.info(f"Registered tools: {list(tool_dispatcher.registry.keys())}")
     logger.info(f"Tool definition count: {len(tool_dispatcher.definitions)}")

@@ -516,7 +516,7 @@ class PhaseReasoningEngine:
         except Exception as e:
             # 执行后端不可达 → 相位降级（P18 语义：不崩、不挂起）
             logger = _get_logger()
-            logger.error(f"相位执行失败: {e}")
+            logger.error(f"Phase execution failed: {e}")
             session.phase_summaries.append(PhaseArtifact(phase.index, type="error", data=str(e)))
             await self._persist(session)
             return self._respond(session, STEP_ABORTED,

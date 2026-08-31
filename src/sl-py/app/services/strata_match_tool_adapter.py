@@ -30,7 +30,7 @@ class StrataMatchToolAdapter:
         elif subtype == "sdk":
             return self._adapt_sdk(tool)
         else:
-            logger.warning(f"不支持的工具类型: {subtype}")
+            logger.warning(f"Unsupported tool type: {subtype}")
             return None
     
     def _adapt_textcli(self, tool: dict[str, Any]) -> dict[str, Any]:
